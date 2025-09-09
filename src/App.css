@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root{
+  --bg: #0b0f17;
+  --panel: #0f1623;
+  --panel-2: #121b2b;
+  --panel-hover: #1a2640;
+  --border: #2a3a55;
+  --text: #dbe5ff;
+  --text-dim: #93a1c6;
+
+  --green: #45d483;
+  --red: #ff6b6b;
+  --blue: #5aa3ff;
+  --gray: #c8d0e5;
+}
+
+*{ box-sizing: border-box; }
+
+body, #root{ height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;}
+.app{
+  min-height: 100vh;
+  padding: 24px;
+}
+.header{
+  display:flex; gap:16px; align-items: flex-end; justify-content: space-between; margin-bottom: 16px;
+}
+.h1{ font-size: 22px; font-weight: 700; margin: 0 0 6px; }
+.note{ color: var(--text-dim); font-size: 13px; margin: 0; }
+
+.btn{
+  border: 1px solid var(--border);
+  background: #1a2540;
+  color: white;
+  padding: 8px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.btn:hover{ background: #20305a; }
+.btn:active{ background: #1a2a4d; }
+
+.card{
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  overflow: hidden;
+  box-shadow: 0 6px 24px rgba(0,0,0,.2);
+}
+
+/* table */
+.table-wrap{ overflow:auto; }
+.table{
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th, .table td{
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+.table thead th{
+  background: var(--panel-2);
+  position: sticky; top: 0; z-index: 2;
+  font-weight: 600;
+}
+.table tbody tr:nth-child(odd){ background: #0f1726; }
+.table tbody tr:nth-child(even){ background: #101a2c; }
+.table tbody tr:hover{ background: var(--panel-hover); }
+
+/* chips & numbers */
+.mode-long{ color: var(--blue); font-weight: 600; }
+.mode-short{ color: var(--red); font-weight: 600; }
+.num-pos{ color: var(--green); font-weight: 600; }
+.num-neg{ color: var(--red); font-weight: 600; }
+.num-zero{ color: var(--gray); }
+.dim{ color: var(--text-dim); }
+
+/* utilities */
+.center{ text-align:center; }
