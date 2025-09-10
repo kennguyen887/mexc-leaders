@@ -8,16 +8,12 @@ import "./App.css";
    (Optional fallback) VITE_PROXY_BASE → base URL if you still want one host providing
      /api/orders and /api/prices
    ===================== */
-const DEFAULT_ORDERS = "https://7382bdf9.whale-futures.pages.dev/api/orders";
-const DEFAULT_PRICES = "https://7382bdf9.whale-futures.pages.dev/api/prices";
 
 const proxyBase = import.meta.env.VITE_PROXY_BASE || ""; // optional legacy fallback
 const ORDERS_API =
-  import.meta.env.VITE_ORDERS_API ||
-  (proxyBase ? `${proxyBase}/api/orders` : DEFAULT_ORDERS);
+  import.meta.env.VITE_ORDERS_API || `${proxyBase}/api/orders`;
 const PRICES_API =
-  import.meta.env.VITE_PRICES_API ||
-  (proxyBase ? `${proxyBase}/api/prices` : DEFAULT_PRICES);
+  import.meta.env.VITE_PRICES_API || `${proxyBase}/api/prices`;
 
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 3000);
 
