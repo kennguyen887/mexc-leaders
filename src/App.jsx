@@ -158,7 +158,22 @@ export default function App() {
   useInterval(load, POLL_MS);
 
   const sorted = useMemo(() => [...rows].sort((a, b) => b.openAt - a.openAt), [rows]);
+  
+  useEffect(() => {
+    const script = document.createElement("script");
+    script.defer = true;
+    script.src = "https://static.cloudflareinsights.com/beacon.min.js";
+    script.setAttribute(
+      "data-cf-beacon",
+      '{"token": "96cad86762d54523b1f7736f0f345953"}'
+    );
+    document.body.appendChild(script);
 
+    return () => {
+      document.body.removeChild(script); // cleanup on unmount
+    };
+  }, []);
+  
   return (
     <div className="app">
       <div className="header">
