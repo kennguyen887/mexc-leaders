@@ -81,3 +81,35 @@ body, #root{ height: 100%; margin: 0; background: var(--bg); color: var(--text);
 
 /* utilities */
 .center{ text-align:center; }
+/* Markdown block from AI */
+.ai-md {
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+/* Bảng markdown dễ đọc hơn */
+.ai-md table {
+  width: 100%;
+  border-collapse: collapse;
+  border-spacing: 0;
+}
+
+.ai-md thead th {
+  border-bottom: 1px solid #93a1c6;
+}
+
+.ai-md th,
+.ai-md td {
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+/* đường kẻ giữa các rows */
+.ai-md tbody tr td {
+  border-bottom: 1px solid #93a1c6;
+}
+
+/* zebra nhẹ */
+.ai-md tbody tr:nth-child(odd) td {
+}

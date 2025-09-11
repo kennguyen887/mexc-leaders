@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'https://7382bdf9.whale-futures.pages.dev',
+        target: 'https://whale-futures.pages.dev',
         changeOrigin: true,
         secure: true,
         // giữ nguyên đường dẫn /api/**
