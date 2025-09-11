@@ -10,10 +10,8 @@ import "./App.css";
    ===================== */
 
 const proxyBase = import.meta.env.VITE_PROXY_BASE || ""; // optional legacy fallback
-const ORDERS_API =
-  import.meta.env.VITE_ORDERS_API || `${proxyBase}/api/orders`;
-const PRICES_API =
-  import.meta.env.VITE_PRICES_API || `${proxyBase}/api/prices`;
+const ORDERS_API = import.meta.env.VITE_ORDERS_API || `${proxyBase}/api/orders`;
+const PRICES_API = import.meta.env.VITE_PRICES_API || `${proxyBase}/api/prices`;
 
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 3000);
 
@@ -22,8 +20,7 @@ const tsVNT = (t) =>
   t
     ? new Date(t)
         .toLocaleString("en-GB", { timeZone: TIMEZONE, hour12: false })
-        .replace(",",
-        "")
+        .replace(",", "")
     : "";
 
 const num = (x) => (typeof x === "number" ? x : Number(x || 0));
@@ -91,14 +88,37 @@ function ColorNumber({ value, decimals = 2, suffix = "" }) {
     </span>
   );
 }
-const ModeCell = ({ mode }) => {
-  const m = String(mode || "");
-  return (
-    <span className={m === "long" ? "mode-long" : m === "short" ? "mode-short" : ""}>
-      {m || "?"}
-    </span>
+
+function ModeCell({ mode }) {
+  const m = String(mode || "").toLowerCase();
+  const cls = m === "long" ? "mode-long" : m === "short" ? "mode-short" : "";
+  return <span className={cls}>{m || "?"}</span>;
+}
+
+/* ---------- CSV helpers (export exactly what is shown) ---------- */
+function escapeCsv(val) {
+  if (val == null) return "";
+  const s = String(val);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function downloadCsvFromRows(columns, rows, filename = "leaders_table.csv") {
+  const header = columns.map((c) => escapeCsv(c.header)).join(",");
+  const lines = rows.map((r) =>
+    columns
+      .map((c) => escapeCsv(c.get?.(r)))
+      .join(",")
   );
-};
+  const csv = [header, ...lines].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 export default function App() {
   const [rows, setRows] = useState([]);
@@ -158,32 +178,57 @@ export default function App() {
   useInterval(load, POLL_MS);
 
   const sorted = useMemo(() => [...rows].sort((a, b) => b.openAt - a.openAt), [rows]);
-  
+
+  // Define columns (what you see is what you export)
+  const columns = useMemo(
+    () => [
+      { header: "Trader", get: (r) => r.trader ?? "" },
+      { header: "Symbol", get: (r) => r.symbol ?? "" },
+      { header: "Mode", get: (r) => <ModeCell mode={r.mode} /> },
+      { header: "Lev", get: (r) => (r.lev ? `${fmt(num(r.lev), 0)}x` : "") },
+      { header: "Margin Mode", get: (r) => r.marginMode ?? "" },
+      { header: "PNL (USDT)", get: (r) => (Number.isFinite(r.__pnl) ? fmt(num(r.__pnl), 2) : "") },
+      { header: "ROI %", get: (r) => (Number.isFinite(r.__roi) ? `${fmt(num(r.__roi), 2)}%` : "") },
+      { header: "Open Price", get: (r) => (Number.isFinite(num(r.openPrice)) ? fmt(num(r.openPrice), 6) : "") },
+      { header: "Market Price", get: (r) => (Number.isFinite(num(r.__marketPrice)) ? fmt(num(r.__marketPrice), 6) : "") },
+      { header: "Δ % vs Open", get: (r) => (Number.isFinite(r.__changePct) ? `${fmt(num(r.__changePct), 2)}%` : "") },
+      { header: "Amount", get: (r) => (Number.isFinite(num(r.amount)) ? fmt(num(r.amount), 4) : "") },
+      { header: "Margin (USDT)", get: (r) => (Number.isFinite(num(r.margin)) ? fmt(num(r.margin), 4) : "") },
+      { header: "Notional (USDT)", get: (r) => (Number.isFinite(num(r.notional)) ? fmt(num(r.notional), 2) : "") },
+      { header: "Open At (VNT)", get: (r) => r.openAtStr || tsVNT(r.openAt) },
+      { header: "Margin %", get: (r) => (Number.isFinite(num(r.marginPct)) ? `${fmt(num(r.marginPct), 2)}%` : "") },
+      { header: "Followers", get: (r) => (r.followers ?? "") },
+      // 👉 UID column at the END, from raw.traderUid
+      { header: "UID", get: (r) => (r.raw?.traderUid != null ? String(r.raw.traderUid) : "") },
+    ],
+    []
+  );
+
+  const handleDownloadCsv = () => {
+    downloadCsvFromRows(columns, sorted, "leaders_table.csv");
+  };
+
   useEffect(() => {
     const script = document.createElement("script");
     script.defer = true;
     script.src = "https://static.cloudflareinsights.com/beacon.min.js";
-    script.setAttribute(
-      "data-cf-beacon",
-      '{"token": "96cad86762d54523b1f7736f0f345953"}'
-    );
+    script.setAttribute("data-cf-beacon", '{"token": "96cad86762d54523b1f7736f0f345953"}');
     document.body.appendChild(script);
 
     return () => {
       document.body.removeChild(script); // cleanup on unmount
     };
   }, []);
-  
+
   return (
     <div className="app">
       <div className="header">
         <div>
           <h1 className="h1">MEXC Copy Futures — Leaders' Orders (Realtime)</h1>
-          <p className="note">
-            Timezone: VNT (Asia/Ho_Chi_Minh) • Refresh: {Math.round(POLL_MS / 1000)}s
-          </p>
+          <p className="note">Timezone: VNT (Asia/Ho_Chi_Minh) • Refresh: {Math.round(POLL_MS / 1000)}s</p>
         </div>
-        <div>
+        <div className="header-actions" style={{ display: "flex", gap: 8 }}>
+          <button className="btn" onClick={handleDownloadCsv}>Download CSV (what you see)</button>
           <button className="btn" onClick={load} disabled={loading}>
             {loading ? "Loading..." : "Refresh"}
           </button>
@@ -210,52 +255,29 @@ export default function App() {
           <table className="table">
             <thead>
               <tr>
-                <th>Trader</th>
-                <th>Symbol</th>
-                <th>Mode</th>
-                <th>Lev</th>
-                <th>Margin Mode</th>
-                <th>PNL (USDT)</th>
-                <th>ROI %</th>
-                <th>Open Price</th>
-                <th>Market Price</th>
-                <th>Δ % vs Open</th>
-                <th>Amount</th>
-                <th>Margin (USDT)</th>
-                <th>Notional (USDT)</th>
-                <th>Open At (VNT)</th>
-                <th>Margin %</th>
-                <th>Followers</th>
+                {columns.map((c) => (
+                  <th key={c.header}>{c.header}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {sorted.map((r) => (
                 <tr key={r.id}>
-                  <td>{r.trader}</td>
-                  <td>{r.symbol}</td>
-                  <td>
-                    <ModeCell mode={r.mode} />
-                  </td>
-                  <td>{fmt(num(r.lev), 0)}x</td>
-                  <td>{r.marginMode}</td>
-                  <td>
-                    <ColorNumber value={r.__pnl} decimals={2} />
-                  </td>
-                  <td>
-                    <ColorNumber value={r.__roi} decimals={2} suffix="%" />
-                  </td>
-                  <td>{fmt(num(r.openPrice), 6)}</td>
-                  <td>{fmt(num(r.__marketPrice), 6)}</td>
-                  <td>
-                    <ColorNumber value={r.__changePct} decimals={2} suffix="%" />
-                  </td>{" "}
-                  {/* 👈 */}
-                  <td>{fmt(num(r.amount), 4)}</td>
-                  <td>{fmt(num(r.margin), 4)}</td>
-                  <td>{fmt(num(r.notional), 2)}</td>
-                  <td>{r.openAtStr || tsVNT(r.openAt)}</td>
-                  <td>{fmt(num(r.marginPct), 2)}%</td>
-                  <td>{r.followers ?? ""}</td>
+                  {columns.map((c) => (
+                    <td key={c.header}>
+                      {c.header === "PNL (USDT)" ? (
+                        <ColorNumber value={r.__pnl} decimals={2} />
+                      ) : c.header === "ROI %" ? (
+                        <ColorNumber value={r.__roi} decimals={2} suffix="%" />
+                      ) : c.header === "Δ % vs Open" ? (
+                        <ColorNumber value={r.__changePct} decimals={2} suffix="%" />
+                      ) : c.header === "Mode" ? (
+                        <ModeCell mode={r.mode} />
+                      ) : (
+                        c.get(r)
+                      )}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
