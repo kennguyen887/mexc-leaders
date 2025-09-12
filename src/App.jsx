@@ -8,7 +8,10 @@ import "./App.css";
 const proxyBase = import.meta.env.VITE_PROXY_BASE || "";
 const ORDERS_API = import.meta.env.VITE_ORDERS_API || `${proxyBase}/api/orders`;
 const PRICES_API = import.meta.env.VITE_PRICES_API || `${proxyBase}/api/prices`;
-const AI_API = "https://whale-futures.pages.dev/api/AI/recommend";
+const AI_API =  import.meta.env.VITE_AI_API || `${proxyBase}/api/AI/recommend`;
+// NEW: API phân tích lệnh futures trực tiếp từ MEXC (server tự fetch)
+const ORDERS_AI_API =
+  import.meta.env.VITE_ORDERS_AI_API || `${proxyBase}/api/AI/recommend-orders`;
 
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 3000);
 const TIMEZONE = "Asia/Ho_Chi_Minh";
@@ -165,17 +168,17 @@ function ApiKeyModal({ open, onClose }) {
             <button className="btn btn-primary" onClick={handleSave}>Save Key</button>
           </div>
         </div>
-
-    
       </div>
     </div>,
     document.body
   );
 }
+
 /** ===================== MAIN APP ===================== */
 export default function App() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [ordersLoading, setOrdersLoading] = useState(false); // NEW: loading cho Orders AI
   const [error, setError] = useState("");
   const [aiResult, setAiResult] = useState("");
   const [showKeyModal, setShowKeyModal] = useState(false);
@@ -246,6 +249,49 @@ export default function App() {
     }
   };
 
+  // NEW: Gọi Orders AI (server tự lấy lệnh từ MEXC, không cần CSV)
+  const runOrdersAI = async () => {
+    try {
+      const key = getInternalApiKey();
+      if (!key) {
+        setShowKeyModal(true);
+        return;
+      }
+      setOrdersLoading(true);
+      setAiResult("Đang lấy lệnh và phân tích (Orders)…");
+
+      const headers = new Headers({ "Content-Type": "application/json" });
+      headers.set("x-api-key", key);
+
+      const res = await fetch(`${ORDERS_AI_API}?topN=10&lang=vi`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}), // giữ JSON để preflight/Content-Type hợp lệ
+      });
+
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(`Response không phải JSON (HTTP ${res.status})`);
+      }
+
+      if (!res.ok || data?.success === false) {
+        const msg = data?.error || `HTTP ${res.status}`;
+        throw new Error(msg);
+      }
+
+      setAiResult(
+        data?.resultMarkdown ||
+          "ℹ️ Không có nội dung trả về từ Orders API. Vui lòng kiểm tra lại dữ liệu lệnh."
+      );
+    } catch (e) {
+      setAiResult("❌ Lỗi Orders: " + (e?.message || String(e)));
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
   useEffect(() => {
     const has = !!getInternalApiKey();
     setKeyExists(has);
@@ -286,17 +332,22 @@ export default function App() {
     <div className="app">
       {/* Header actions + trạng thái key */}
       <div className="header-actions" style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-               <button
+        <button
           className="btn"
           onClick={() => setShowKeyModal(true)}
           title="Set INTERNAL_API_KEY"
         >
           {keyExists ? "Update Key" : "Set API Key"}
         </button>
+
         <button className="btn" onClick={runAI}>AI Recommend</button>
+
+        {/* NEW: Orders AI */}
+        <button className="btn" onClick={runOrdersAI} disabled={ordersLoading}>
+          {ordersLoading ? "Orders…" : "Orders"}
+        </button>
+
         <button className="btn" onClick={() => copyCsvToClipboard(columns, sorted)}>Copy CSV</button>
-
-
 
         <span
           className="inline-dot"
@@ -310,8 +361,9 @@ export default function App() {
           }}
           title={keyExists ? "API key loaded" : "Missing API key"}
         />
-         <button className="btn" onClick={load} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button>
-       
+        <button className="btn" onClick={load} disabled={loading}>
+          {loading ? "Loading..." : "Refresh"}
+        </button>
       </div>
 
       {aiResult && (
