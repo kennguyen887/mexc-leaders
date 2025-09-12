@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { marked } from "marked";
+import { createPortal } from "react-dom";
 marked.setOptions({ gfm: true, breaks: true }); // cho xuống dòng kiểu Markdown
 
 import "./App.css";
@@ -14,8 +15,8 @@ const TIMEZONE = "Asia/Ho_Chi_Minh";
 const tsVNT = (t) =>
   t
     ? new Date(t)
-      .toLocaleString("en-GB", { timeZone: TIMEZONE, hour12: false })
-      .replace(",", "")
+        .toLocaleString("en-GB", { timeZone: TIMEZONE, hour12: false })
+        .replace(",", "")
     : "";
 
 const num = (x) => (typeof x === "number" ? x : Number(x || 0));
@@ -36,13 +37,44 @@ function useInterval(cb, delay) {
   }, [delay]);
 }
 
-async function fetchJSON(url, params = {}) {
+/** ===================== API KEY (localStorage) ===================== */
+const STORAGE_KEY = "internal_api_key";
+
+function getInternalApiKey() {
+  try {
+    return (
+      window.localStorage.getItem(STORAGE_KEY) ||
+      (import.meta.env.VITE_INTERNAL_API_KEY || "")
+    );
+  } catch {
+    return import.meta.env.VITE_INTERNAL_API_KEY || "";
+  }
+}
+function setInternalApiKey(key) {
+  try {
+    if (key && typeof key === "string") {
+      window.localStorage.setItem(STORAGE_KEY, key);
+    } else {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/** fetch JSON helper với header x-api-key tự động */
+async function fetchJSON(url, params = {}, init = {}) {
   const qs = new URLSearchParams(params).toString();
-  const r = await fetch(url + (qs ? `?${qs}` : ""));
+  const key = getInternalApiKey();
+  const headers = new Headers(init.headers || {});
+  if (key) headers.set("x-api-key", key);
+
+  const r = await fetch(url + (qs ? `?${qs}` : ""), { ...init, headers });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
 
+/** ===================== UI Helpers ===================== */
 function ColorNumber({ value, decimals = 2, suffix = "" }) {
   if (!Number.isFinite(value)) return <span className="dim">—</span>;
   const v = Number(value);
@@ -78,11 +110,76 @@ async function copyCsvToClipboard(columns, rows) {
   await navigator.clipboard.writeText(csv);
 }
 
+/** ===================== Popup nhập INTERNAL_API_KEY ===================== */
+
+function ApiKeyModal({ open, onClose }) {
+  const [value, setValue] = useState("");
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    if (open) {
+      setValue(getInternalApiKey());
+      setTimeout(() => inputRef.current?.focus(), 50);
+      document.body.style.overflow = "hidden"; // chặn scroll nền
+      return () => { document.body.style.overflow = ""; };
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const handleSave = () => {
+    const trimmed = (value || "").trim();
+    setInternalApiKey(trimmed);
+    onClose?.(trimmed);
+  };
+  const handleClear = () => {
+    setInternalApiKey("");
+    setValue("");
+    onClose?.("");
+  };
+
+  return createPortal(
+    <div className="modal-root" role="dialog" aria-modal="true">
+      <div className="modal-backdrop" onClick={() => onClose?.(getInternalApiKey())} />
+      <div className="modal-card">
+        <h2 className="modal-title">Set INTERNAL_API_KEY</h2>
+        <p className="modal-desc">
+          Khóa này sẽ được lưu trong <code>localStorage</code> và tự động gắn vào header <code>x-api-key</code> cho mọi request.
+        </p>
+
+        <label className="modal-label" htmlFor="apiKey">INTERNAL_API_KEY</label>
+        <input
+          id="apiKey"
+          ref={inputRef}
+          type="password"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="Nhập khóa nội bộ..."
+          className="modal-input"
+        />
+
+        <div className="modal-actions">
+          <button className="btn btn-ghost" onClick={handleClear} title="Xóa key khỏi localStorage">Clear</button>
+          <div className="modal-actions-right">
+            <button className="btn btn-ghost" onClick={() => onClose?.(getInternalApiKey())}>Cancel</button>
+            <button className="btn btn-primary" onClick={handleSave}>Save Key</button>
+          </div>
+        </div>
+
+    
+      </div>
+    </div>,
+    document.body
+  );
+}
+/** ===================== MAIN APP ===================== */
 export default function App() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [aiResult, setAiResult] = useState("");
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [keyExists, setKeyExists] = useState(false);
 
   const load = async () => {
     try {
@@ -92,7 +189,14 @@ export default function App() {
       if (!data.success) throw new Error(data.error || "Unknown error");
       let baseRows = Array.isArray(data.data) ? data.data : [];
 
-      const needSymbols = [...new Set(baseRows.filter((r) => !r.closeAvgPrice).map((r) => r.symbol).filter(Boolean))];
+      const needSymbols = [
+        ...new Set(
+          baseRows
+            .filter((r) => !r.closeAvgPrice)
+            .map((r) => r.symbol)
+            .filter(Boolean)
+        ),
+      ];
       let priceMap = {};
       if (needSymbols.length) {
         const res = await fetchJSON(PRICES_API, { symbols: needSymbols.join(",") });
@@ -125,9 +229,13 @@ export default function App() {
     try {
       setAiResult("Đang phân tích...");
       const csv = buildCsv(columns, sorted);
+      const key = getInternalApiKey();
+      const headers = new Headers({ "Content-Type": "application/json" });
+      if (key) headers.set("x-api-key", key);
+
       const res = await fetch(`${AI_API}?topN=8`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ csv }),
       });
       const data = await res.json();
@@ -137,6 +245,12 @@ export default function App() {
       setAiResult("❌ Lỗi: " + (e.message || e));
     }
   };
+
+  useEffect(() => {
+    const has = !!getInternalApiKey();
+    setKeyExists(has);
+    if (!has) setShowKeyModal(true);
+  }, []);
 
   useEffect(() => {
     load();
@@ -170,14 +284,38 @@ export default function App() {
 
   return (
     <div className="app">
-      <div className="header-actions" style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button className="btn" onClick={() => copyCsvToClipboard(columns, sorted)}>Copy CSV</button>
-        <button className="btn" onClick={load} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button>
+      {/* Header actions + trạng thái key */}
+      <div className="header-actions" style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
+               <button
+          className="btn"
+          onClick={() => setShowKeyModal(true)}
+          title="Set INTERNAL_API_KEY"
+        >
+          {keyExists ? "Update Key" : "Set API Key"}
+        </button>
         <button className="btn" onClick={runAI}>AI Recommend</button>
+        <button className="btn" onClick={() => copyCsvToClipboard(columns, sorted)}>Copy CSV</button>
+
+
+
+        <span
+          className="inline-dot"
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: "999px",
+            background: keyExists ? "#22c55e" : "#ef4444",
+            display: "inline-block",
+            marginLeft: 8
+          }}
+          title={keyExists ? "API key loaded" : "Missing API key"}
+        />
+         <button className="btn" onClick={load} disabled={loading}>{loading ? "Loading..." : "Refresh"}</button>
+       
       </div>
 
       {aiResult && (
-        <div className="card" style={{maxWidth: 1300, marginBottom: 12 , paddingLeft: 12, position: "relative" }}>
+        <div className="card" style={{ maxWidth: 1300, marginBottom: 12, paddingLeft: 12, position: "relative" }}>
           {/* X close */}
           <button
             className="btn-icon close"
@@ -206,7 +344,6 @@ export default function App() {
             className="ai-md"
             dangerouslySetInnerHTML={{ __html: marked.parse(aiResult) }}
             style={{
-              // xử lý dòng dài
               whiteSpace: "normal",
               overflowWrap: "anywhere",
               wordBreak: "break-word",
@@ -216,9 +353,17 @@ export default function App() {
         </div>
       )}
 
-
       {error && (
-        <div className="card" style={{ padding: 12, borderColor: "#7a2d2d", background: "#26161a", color: "#ffb4b4", marginBottom: 12 }}>
+        <div
+          className="card"
+          style={{
+            padding: 12,
+            borderColor: "#7a2d2d",
+            background: "#26161a",
+            color: "#ffb4b4",
+            marginBottom: 12,
+          }}
+        >
           {error}
         </div>
       )}
@@ -257,6 +402,15 @@ export default function App() {
           </table>
         </div>
       </div>
+
+      {/* Modal nhập API key */}
+      <ApiKeyModal
+        open={showKeyModal}
+        onClose={() => {
+          setKeyExists(!!getInternalApiKey());
+          setShowKeyModal(false);
+        }}
+      />
     </div>
   );
 }

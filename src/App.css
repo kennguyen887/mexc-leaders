@@ -113,3 +113,89 @@ body, #root{ height: 100%; margin: 0; background: var(--bg); color: var(--text);
 /* zebra nhẹ */
 .ai-md tbody tr:nth-child(odd) td {
 }
+/* ===== Modal (Portal) ===== */
+.modal-root {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647; /* rất cao để nổi trên mọi thứ */
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 10vh 16px 16px; /* cách top 10vh */
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+}
+
+.modal-card {
+  position: relative;
+  width: 100%;
+  max-width: 640px;
+  background: #0f1726;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0,0,0,.25);
+  padding: 24px;
+  z-index: 1; /* nằm trên backdrop */
+}
+
+.modal-title {
+  margin: 0 0 12px;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.modal-desc, .modal-tip {
+  color: #4b5563; /* gray-600 */
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+
+.modal-label {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 8px 0 6px;
+}
+
+.modal-input {
+  width: 100%;
+  border: 1px solid #d1d5db; /* gray-300 */
+  border-radius: 0px;
+  padding: 10px 12px;
+  outline: none;
+}
+.modal-input:focus {
+  border-color: #111827; /* gray-900 */
+  box-shadow: 0 0 0 3px rgba(0,0,0,0.1);
+}
+
+.modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16px;
+}
+.modal-actions-right {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.btn {
+  padding: 8px 12px;
+  border-radius:0px;
+  border: 1px solid #2a3a55;
+  background: #0f1623;
+  color: #fff;
+  cursor: pointer;
+}
+.btn:hover { background: #111827; }
+.btn-primary {
+  border-color: #111827;
+  background: #4b5563;
+  color: #fff;
+}
+.btn-primary:hover { background: #0b0b0b; }
+.btn-ghost { background: transparent; color: #fff; border: 0px; }
