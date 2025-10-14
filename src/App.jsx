@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { marked } from "marked";
 import { createPortal } from "react-dom";
-marked.setOptions({ gfm: true, breaks: true }); // cho xuống dòng kiểu Markdown
+marked.setOptions({ gfm: true, breaks: true });
 
 import "./App.css";
 
@@ -9,60 +9,46 @@ const proxyBase = import.meta.env.VITE_PROXY_BASE || "";
 const ORDERS_API = import.meta.env.VITE_ORDERS_API || `${proxyBase}/api/orders`;
 const PRICES_API = import.meta.env.VITE_PRICES_API || `${proxyBase}/api/prices`;
 const AI_API =  import.meta.env.VITE_AI_API || `${proxyBase}/api/AI/recommend`;
-// NEW: API phân tích lệnh futures trực tiếp từ MEXC (server tự fetch)
 const ORDERS_AI_API =
   import.meta.env.VITE_ORDERS_AI_API || `${proxyBase}/api/AI/recommend-orders`;
 
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 3000);
 const TIMEZONE = "Asia/Ho_Chi_Minh";
+const PER_REQ_DELAY_MS = 100;     // delay giữa các request
+const BATCH_SIZE = 3;             // mỗi request gồm 3 UID
+
+const DEFAULT_UIDS =
+  "78481146,89070846,74785697,22247145,88833523,40133940,84277140,93640617,76459243,48673493,13290625,48131784,23747691,89989257,69454560,52543521,07867898,36267959,90901845,27012439,58298982,72486517,30339263,49140673,20393898,93765871,98086898,81873060,08796342,34988691,02058392,83769107,47991559,82721272,89920323,92798483,72432594,87698388,31866177,49787038,45227412,80813692,27337672,95927229,71925540,38063228,47395458,57343925,01249789,21810967";
+const UID_LIST = DEFAULT_UIDS.split(",").map(s => s.trim()).filter(Boolean);
+
 const tsVNT = (t) =>
-  t
-    ? new Date(t)
-        .toLocaleString("en-GB", { timeZone: TIMEZONE, hour12: false })
-        .replace(",", "")
-    : "";
+  t ? new Date(t).toLocaleString("en-GB", { timeZone: TIMEZONE, hour12: false }).replace(",", "") : "";
 
 const num = (x) => (typeof x === "number" ? x : Number(x || 0));
 const fmt = (n, d = 2) =>
-  Number.isFinite(n)
-    ? n.toLocaleString(undefined, { maximumFractionDigits: d })
-    : n;
+  Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: d }) : n;
 
-function useInterval(cb, delay) {
-  const savedRef = useRef(cb);
-  useEffect(() => {
-    savedRef.current = cb;
-  }, [cb]);
-  useEffect(() => {
-    if (delay == null) return;
-    const id = setInterval(() => savedRef.current?.(), delay);
-    return () => clearInterval(id);
-  }, [delay]);
-}
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const chunk = (arr, size) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
 
 /** ===================== API KEY (localStorage) ===================== */
 const STORAGE_KEY = "internal_api_key";
-
 function getInternalApiKey() {
   try {
-    return (
-      window.localStorage.getItem(STORAGE_KEY) ||
-      (import.meta.env.VITE_INTERNAL_API_KEY || "")
-    );
+    return window.localStorage.getItem(STORAGE_KEY) || (import.meta.env.VITE_INTERNAL_API_KEY || "");
   } catch {
     return import.meta.env.VITE_INTERNAL_API_KEY || "";
   }
 }
 function setInternalApiKey(key) {
   try {
-    if (key && typeof key === "string") {
-      window.localStorage.setItem(STORAGE_KEY, key);
-    } else {
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
-  } catch {
-    // ignore
-  }
+    if (key && typeof key === "string") window.localStorage.setItem(STORAGE_KEY, key);
+    else window.localStorage.removeItem(STORAGE_KEY);
+  } catch {}
 }
 
 /** fetch JSON helper với header x-api-key tự động */
@@ -71,7 +57,6 @@ async function fetchJSON(url, params = {}, init = {}) {
   const key = getInternalApiKey();
   const headers = new Headers(init.headers || {});
   if (key) headers.set("x-api-key", key);
-
   const r = await fetch(url + (qs ? `?${qs}` : ""), { ...init, headers });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
@@ -82,20 +67,13 @@ function ColorNumber({ value, decimals = 2, suffix = "" }) {
   if (!Number.isFinite(value)) return <span className="dim">—</span>;
   const v = Number(value);
   const cls = v > 0 ? "num-pos" : v < 0 ? "num-neg" : "num-zero";
-  return (
-    <span className={cls}>
-      {fmt(v, decimals)}
-      {suffix}
-    </span>
-  );
+  return <span className={cls}>{fmt(v, decimals)}{suffix}</span>;
 }
-
 function ModeCell({ mode }) {
   const m = String(mode || "").toLowerCase();
   const cls = m === "long" ? "mode-long" : m === "short" ? "mode-short" : "";
   return <span className={cls}>{m || "?"}</span>;
 }
-
 function escapeCsv(val) {
   if (val == null) return "";
   const s = String(val);
@@ -103,9 +81,7 @@ function escapeCsv(val) {
 }
 function buildCsv(columns, rows) {
   const header = columns.map((c) => escapeCsv(c.header)).join(",");
-  const lines = rows.map((r) =>
-    columns.map((c) => escapeCsv(c.get?.(r))).join(",")
-  );
+  const lines = rows.map((r) => columns.map((c) => escapeCsv(c.get?.(r))).join(","));
   return [header, ...lines].join("\n");
 }
 async function copyCsvToClipboard(columns, rows) {
@@ -114,7 +90,6 @@ async function copyCsvToClipboard(columns, rows) {
 }
 
 /** ===================== Popup nhập INTERNAL_API_KEY ===================== */
-
 function ApiKeyModal({ open, onClose }) {
   const [value, setValue] = useState("");
   const inputRef = useRef(null);
@@ -123,7 +98,7 @@ function ApiKeyModal({ open, onClose }) {
     if (open) {
       setValue(getInternalApiKey());
       setTimeout(() => inputRef.current?.focus(), 50);
-      document.body.style.overflow = "hidden"; // chặn scroll nền
+      document.body.style.overflow = "hidden";
       return () => { document.body.style.overflow = ""; };
     }
   }, [open]);
@@ -177,133 +152,169 @@ function ApiKeyModal({ open, onClose }) {
 /** ===================== MAIN APP ===================== */
 export default function App() {
   const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [ordersLoading, setOrdersLoading] = useState(false); // NEW: loading cho Orders AI
+  const [loading, setLoading] = useState(false);   // Refresh thủ công (1 pass)
+  const [ordersLoading, setOrdersLoading] = useState(false);
   const [error, setError] = useState("");
   const [aiResult, setAiResult] = useState("");
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [keyExists, setKeyExists] = useState(false);
 
-  const load = async () => {
-    try {
-      setError("");
-      setLoading(true);
-      const data = await fetchJSON(ORDERS_API);
-      if (!data.success) throw new Error(data.error || "Unknown error");
-      let baseRows = Array.isArray(data.data) ? data.data : [];
+  // id -> row
+  const rowsMapRef = useRef(new Map());
+  // symbol -> price
+  const priceMapRef = useRef({});
 
-      const needSymbols = [
-        ...new Set(
-          baseRows
-            .filter((r) => !r.closeAvgPrice)
-            .map((r) => r.symbol)
-            .filter(Boolean)
-        ),
-      ];
-      let priceMap = {};
-      if (needSymbols.length) {
-        const res = await fetchJSON(PRICES_API, { symbols: needSymbols.join(",") });
-        if (res.success && res.prices) priceMap = res.prices;
+  function getRowUid(r) {
+    return r?.raw?.traderUid != null ? String(r.raw.traderUid)
+      : (r?.uid != null ? String(r.uid) : "");
+  }
+
+  function enrichWithLive(r, priceMap) {
+    const open = num(r.openPrice);
+    const live = priceMap?.[r.symbol];
+    const amount = num(r.amount);
+
+    const pnl = Number.isFinite(live) && Number.isFinite(open) && Number.isFinite(amount)
+      ? (live - open) * (String(r.mode).toLowerCase() === "long" ? 1 : -1) * amount
+      : NaN;
+
+    const roi = Number.isFinite(pnl) && Number.isFinite(num(r.margin)) && num(r.margin) !== 0
+      ? (pnl / num(r.margin)) * 100
+      : NaN;
+
+    const changePct = Number.isFinite(open) && Number.isFinite(live) && open !== 0
+      ? ((live - open) / open) * 100
+      : NaN;
+
+    const openAtMs = r.openAt
+      ? new Date(r.openAt).getTime()
+      : (typeof r.openAtMs === "number" ? r.openAtMs : NaN);
+
+    return {
+      ...r,
+      openAt: openAtMs,
+      openAtStr: openAtMs ? tsVNT(openAtMs) : "",
+      __pnl: Number.isFinite(pnl) ? pnl : NaN,
+      __roi: Number.isFinite(roi) ? roi : NaN,
+      __marketPrice: Number.isFinite(live) ? live : undefined,
+      __changePct: Number.isFinite(changePct) ? changePct : NaN,
+    };
+  }
+
+  // Upsert theo id + prune theo các UID trong batch
+  const upsertAndPruneBatch = (arr, batchUids) => {
+    const m = rowsMapRef.current;
+    const batchSet = new Set(batchUids.map(String));
+
+    // Build mapping uid -> Set(ids) từ response
+    const uidToIds = new Map();
+    for (const r of Array.isArray(arr) ? arr : []) {
+      const uid = getRowUid(r);
+      if (!uid) continue;
+      if (!uidToIds.has(uid)) uidToIds.set(uid, new Set());
+      uidToIds.get(uid).add(r.id);
+    }
+
+    // PRUNE: với mọi row có UID thuộc batch nhưng id không nằm trong response uid->ids thì delete
+    for (const [id, row] of m.entries()) {
+      const uid = getRowUid(row);
+      if (!uid || !batchSet.has(uid)) continue;
+      const keepIds = uidToIds.get(uid);
+      if (!keepIds || !keepIds.has(id)) {
+        m.delete(id);
       }
+    }
 
-      baseRows = baseRows.map((r) => {
-        const open = num(r.openPrice);
-        const live = priceMap[r.symbol];
-        const pnl = (live - open) * (r.mode === "long" ? 1 : -1) * num(r.amount);
-        const roi = num(r.margin) ? (pnl / num(r.margin)) * 100 : NaN;
-        const changePct = open && live ? ((live - open) / open) * 100 : NaN;
-        return {
-          ...r,
-          __pnl: Number.isFinite(pnl) ? pnl : NaN,
-          __roi: Number.isFinite(roi) ? roi : NaN,
-          __marketPrice: live,
-          __changePct: Number.isFinite(changePct) ? changePct : NaN,
-        };
-      });
-      setRows(baseRows);
+    // UPSERT: merge theo id
+    for (const r of Array.isArray(arr) ? arr : []) {
+      const existing = m.get(r.id);
+      const merged = { ...(existing || {}), ...r };
+      const enriched = enrichWithLive(merged, priceMapRef.current);
+      m.set(r.id, enriched);
+    }
+
+    // Rebuild list
+    setRows(Array.from(m.values()));
+  };
+
+  // Giá thị trường định kỳ
+  const refreshPrices = async () => {
+    try {
+      const list = Array.from(rowsMapRef.current.values());
+      const needSymbols = [
+        ...new Set(list.filter((r) => !r.closeAvgPrice && r.symbol).map((r) => r.symbol)),
+      ];
+      if (!needSymbols.length) return;
+      const res = await fetchJSON(PRICES_API, { symbols: needSymbols.join(",") });
+      if (res?.success && res?.prices) {
+        priceMapRef.current = { ...priceMapRef.current, ...res.prices };
+        const list2 = list.map((r) => enrichWithLive(r, priceMapRef.current));
+        setRows(list2);
+      }
+    } catch {}
+  };
+
+  // Vòng lặp vô tận: duyệt các batch (mỗi batch 3 UID)
+  useEffect(() => {
+    let cancelled = false;
+
+    const startLoop = async () => {
+      const has = !!getInternalApiKey();
+      setKeyExists(has);
+      if (!has) setShowKeyModal(true);
+
+      const batches = chunk(UID_LIST, BATCH_SIZE);
+
+      while (!cancelled) {
+        for (const batch of batches) {
+          if (cancelled) break;
+          try {
+            const uidsParam = batch.join(",");
+            const data = await fetchJSON(ORDERS_API, { uids: uidsParam });
+            if (data?.success) {
+              const arr = Array.isArray(data.data) ? data.data : [];
+              upsertAndPruneBatch(arr, batch);
+            }
+          } catch (e) {
+            setError(e.message || String(e));
+          }
+          await sleep(PER_REQ_DELAY_MS);
+        }
+        // hết vòng batches -> lặp lại
+      }
+    };
+
+    startLoop();
+    return () => { cancelled = true; };
+  }, []);
+
+  // Refresh giá theo chu kỳ
+  useEffect(() => {
+    const id = setInterval(refreshPrices, POLL_MS);
+    return () => clearInterval(id);
+  }, []);
+
+  // Refresh 1 pass toàn bộ bằng batch
+  const loadOnceAll = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const batches = chunk(UID_LIST, BATCH_SIZE);
+      for (const batch of batches) {
+        const uidsParam = batch.join(",");
+        const data = await fetchJSON(ORDERS_API, { uids: uidsParam });
+        if (data?.success) {
+          upsertAndPruneBatch(Array.isArray(data.data) ? data.data : [], batch);
+        }
+        await sleep(PER_REQ_DELAY_MS);
+      }
+      await refreshPrices();
     } catch (e) {
       setError(e.message || String(e));
     } finally {
       setLoading(false);
     }
   };
-
-  const runAI = async () => {
-    try {
-      setAiResult("Đang phân tích...");
-      const csv = buildCsv(columns, sorted);
-      const key = getInternalApiKey();
-      const headers = new Headers({ "Content-Type": "application/json" });
-      if (key) headers.set("x-api-key", key);
-
-      const res = await fetch(`${AI_API}?topN=8`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ csv }),
-      });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || "AI error");
-      setAiResult(data.resultMarkdown);
-    } catch (e) {
-      setAiResult("❌ Lỗi: " + (e.message || e));
-    }
-  };
-
-  // NEW: Gọi Orders AI (server tự lấy lệnh từ MEXC, không cần CSV)
-  const runOrdersAI = async () => {
-    try {
-      const key = getInternalApiKey();
-      if (!key) {
-        setShowKeyModal(true);
-        return;
-      }
-      setOrdersLoading(true);
-      setAiResult("Đang lấy lệnh và phân tích (Orders)…");
-
-      const headers = new Headers({ "Content-Type": "application/json" });
-      headers.set("x-api-key", key);
-
-      const res = await fetch(`${ORDERS_AI_API}?topN=10&lang=vi`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({}), // giữ JSON để preflight/Content-Type hợp lệ
-      });
-
-      let data;
-      try {
-        data = await res.json();
-      } catch {
-        throw new Error(`Response không phải JSON (HTTP ${res.status})`);
-      }
-
-      if (!res.ok || data?.success === false) {
-        const msg = data?.error || `HTTP ${res.status}`;
-        throw new Error(msg);
-      }
-
-      setAiResult(
-        data?.resultMarkdown ||
-          "ℹ️ Không có nội dung trả về từ Orders API. Vui lòng kiểm tra lại dữ liệu lệnh."
-      );
-    } catch (e) {
-      setAiResult("❌ Lỗi Orders: " + (e?.message || String(e)));
-    } finally {
-      setOrdersLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    const has = !!getInternalApiKey();
-    setKeyExists(has);
-    if (!has) setShowKeyModal(true);
-  }, []);
-
-  useEffect(() => {
-    load();
-  }, []);
-  useInterval(load, POLL_MS);
-
-  const sorted = useMemo(() => [...rows].sort((a, b) => b.openAt - a.openAt), [rows]);
 
   const columns = useMemo(
     () => [
@@ -328,94 +339,117 @@ export default function App() {
     []
   );
 
+  // Sort mới -> cũ theo openAt
+  const sorted = useMemo(
+    () => [...rows].sort((a, b) => (Number(b.openAt) || 0) - (Number(a.openAt) || 0)),
+    [rows]
+  );
+
+  const runAI = async () => {
+    try {
+      setAiResult("Đang phân tích...");
+      const csv = buildCsv(columns, sorted);
+      const key = getInternalApiKey();
+      const headers = new Headers({ "Content-Type": "application/json" });
+      if (key) headers.set("x-api-key", key);
+
+      const res = await fetch(`${AI_API}?topN=8`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ csv }),
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || "AI error");
+      setAiResult(data.resultMarkdown);
+    } catch (e) {
+      setAiResult("❌ Lỗi: " + (e.message || e));
+    }
+  };
+
+  const runOrdersAI = async () => {
+    try {
+      const key = getInternalApiKey();
+      if (!key) { setShowKeyModal(true); return; }
+      setOrdersLoading(true);
+      setAiResult("Đang lấy lệnh và phân tích (Orders)…");
+
+      const headers = new Headers({ "Content-Type": "application/json" });
+      headers.set("x-api-key", key);
+
+      const res = await fetch(`${ORDERS_AI_API}?topN=10&lang=vi`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({}),
+      });
+
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(`Response không phải JSON (HTTP ${res.status})`);
+      }
+
+      if (!res.ok || data?.success === false) {
+        throw new Error(data?.error || `HTTP ${res.status}`);
+      }
+      setAiResult(data?.resultMarkdown || "ℹ️ Không có nội dung trả về từ Orders API.");
+    } catch (e) {
+      setAiResult("❌ Lỗi Orders: " + (e?.message || String(e)));
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
   return (
     <div className="app">
-      {/* Header actions + trạng thái key */}
       <div className="header-actions" style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
-        <button
-          className="btn"
-          onClick={() => setShowKeyModal(true)}
-          title="Set INTERNAL_API_KEY"
-        >
+        <button className="btn" onClick={() => setShowKeyModal(true)} title="Set INTERNAL_API_KEY">
           {keyExists ? "Update Key" : "Set API Key"}
         </button>
 
         <button className="btn" onClick={runAI}>AI Recommend</button>
-
-        {/* NEW: Orders AI */}
         <button className="btn" onClick={runOrdersAI} disabled={ordersLoading}>
           {ordersLoading ? "Orders…" : "Orders"}
         </button>
-
         <button className="btn" onClick={() => copyCsvToClipboard(columns, sorted)}>Copy CSV</button>
 
         <span
           className="inline-dot"
           style={{
-            width: 10,
-            height: 10,
-            borderRadius: "999px",
-            background: keyExists ? "#22c55e" : "#ef4444",
-            display: "inline-block",
-            marginLeft: 8
+            width: 10, height: 10, borderRadius: "999px",
+            background: keyExists ? "#22c55e" : "#ef4444", display: "inline-block", marginLeft: 8
           }}
           title={keyExists ? "API key loaded" : "Missing API key"}
         />
-        <button className="btn" onClick={load} disabled={loading}>
+        <button className="btn" onClick={loadOnceAll} disabled={loading}>
           {loading ? "Loading..." : "Refresh"}
         </button>
       </div>
 
       {aiResult && (
         <div className="card" style={{ maxWidth: 1300, marginBottom: 12, paddingLeft: 12, position: "relative" }}>
-          {/* X close */}
           <button
             className="btn-icon close"
             aria-label="Close AI result"
             onClick={() => setAiResult("")}
             title="Đóng kết quả AI"
-            style={{
-              position: "absolute",
-              top: 0,
-              right: 8,
-              border: "none",
-              background: "transparent",
-              fontSize: 30,
-              lineHeight: 1,
-              cursor: "pointer",
-              opacity: 0.65,
-            }}
+            style={{ position: "absolute", top: 0, right: 8, border: "none", background: "transparent",
+                     fontSize: 30, lineHeight: 1, cursor: "pointer", opacity: 0.65 }}
             onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
             onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.65")}
           >
             ×
           </button>
-
-          {/* Markdown content */}
           <div
             className="ai-md"
             dangerouslySetInnerHTML={{ __html: marked.parse(aiResult) }}
-            style={{
-              whiteSpace: "normal",
-              overflowWrap: "anywhere",
-              wordBreak: "break-word",
-              margin: 0,
-            }}
+            style={{ whiteSpace: "normal", overflowWrap: "anywhere", wordBreak: "break-word", margin: 0 }}
           />
         </div>
       )}
 
       {error && (
-        <div
-          className="card"
-          style={{
-            padding: 12,
-            borderColor: "#7a2d2d",
-            background: "#26161a",
-            color: "#ffb4b4",
-            marginBottom: 12,
-          }}
-        >
+        <div className="card" style={{ padding: 12, borderColor: "#7a2d2d", background: "#26161a", color: "#ffb4b4", marginBottom: 12 }}>
           {error}
         </div>
       )}
@@ -424,11 +458,7 @@ export default function App() {
         <div className="table-wrap">
           <table className="table">
             <thead>
-              <tr>
-                {columns.map((c) => (
-                  <th key={c.header}>{c.header}</th>
-                ))}
-              </tr>
+              <tr>{columns.map((c) => (<th key={c.header}>{c.header}</th>))}</tr>
             </thead>
             <tbody>
               {sorted.map((r) => (
@@ -455,7 +485,6 @@ export default function App() {
         </div>
       </div>
 
-      {/* Modal nhập API key */}
       <ApiKeyModal
         open={showKeyModal}
         onClose={() => {
