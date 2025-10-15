@@ -1,3 +1,4 @@
+/* eslint-disable no-empty */
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { marked } from "marked";
 import { createPortal } from "react-dom";
@@ -8,18 +9,38 @@ import "./App.css";
 const proxyBase = import.meta.env.VITE_PROXY_BASE || "";
 const ORDERS_API = import.meta.env.VITE_ORDERS_API || `${proxyBase}/api/orders`;
 const PRICES_API = import.meta.env.VITE_PRICES_API || `${proxyBase}/api/prices`;
-const AI_API =  import.meta.env.VITE_AI_API || `${proxyBase}/api/AI/recommend`;
+const AI_API = import.meta.env.VITE_AI_API || `${proxyBase}/api/AI/recommend`;
 const ORDERS_AI_API =
   import.meta.env.VITE_ORDERS_AI_API || `${proxyBase}/api/AI/recommend-orders`;
 
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 3000);
 const TIMEZONE = "Asia/Ho_Chi_Minh";
-const PER_REQ_DELAY_MS = 100;     // delay giữa các request
-const BATCH_SIZE = 3;             // mỗi request gồm 3 UID
+const PER_REQ_DELAY_MS = Number(import.meta.env.VITE_PER_REQ_DELAY_MS || 90); // delay giữa các request
+const BATCH_SIZE = Number(import.meta.env.VITE_BATCH_SIZE || 3);              // mỗi request gồm 3 UID
 
-const DEFAULT_UIDS =
-  "78481146,89070846,74785697,22247145,88833523,40133940,84277140,93640617,76459243,48673493,13290625,48131784,23747691,89989257,69454560,52543521,07867898,36267959,90901845,27012439,58298982,72486517,30339263,49140673,20393898,93765871,98086898,81873060,08796342,34988691,02058392,83769107,47991559,82721272,89920323,92798483,72432594,87698388,31866177,49787038,45227412,80813692,27337672,95927229,71925540,38063228,47395458,57343925,01249789,21810967";
-const UID_LIST = DEFAULT_UIDS.split(",").map(s => s.trim()).filter(Boolean);
+// ==== Tham số chọn trader từ MEXC (có thể override bằng .env) ====
+const TRADERS_INTERVAL = import.meta.env.VITE_TRADERS_INTERVAL || "ALL";
+const TRADERS_LIMIT = Number(import.meta.env.VITE_TRADERS_LIMIT || 150);
+const TRADERS_ORDER_BY = import.meta.env.VITE_TRADERS_ORDER_BY || "ROI";
+const TRADERS_PAGE = Number(import.meta.env.VITE_TRADERS_PAGE || 1);
+
+// Xây URL gốc của MEXC theo rule bạn đã dùng trong cURL
+function buildMexcTradersUrlWith(orderBy) {
+  const base = "https://www.mexc.com/api/platform/futures/copyFutures/api/v1/traders/v2";
+  const params = new URLSearchParams({
+    intervalType: TRADERS_INTERVAL,
+    limit: String(TRADERS_LIMIT),
+    orderBy: orderBy || TRADERS_ORDER_BY,
+    page: String(TRADERS_PAGE),
+  });
+  return `${base}?${params.toString()}`;
+}
+// Endpoint proxy call qua CF Pages Functions (tránh CORS/DDoS)
+function buildProxyCallUrl(callUrl) {
+  const u = new URL(`${proxyBase}/api/call`);
+  u.searchParams.set("callUrl", callUrl);
+  return u.toString();
+}
 
 const tsVNT = (t) =>
   t ? new Date(t).toLocaleString("en-GB", { timeZone: TIMEZONE, hour12: false }).replace(",", "") : "";
@@ -48,7 +69,7 @@ function setInternalApiKey(key) {
   try {
     if (key && typeof key === "string") window.localStorage.setItem(STORAGE_KEY, key);
     else window.localStorage.removeItem(STORAGE_KEY);
-  } catch {}
+  } catch { }
 }
 
 /** fetch JSON helper với header x-api-key tự động */
@@ -57,6 +78,7 @@ async function fetchJSON(url, params = {}, init = {}) {
   const key = getInternalApiKey();
   const headers = new Headers(init.headers || {});
   if (key) headers.set("x-api-key", key);
+  // các header khác có thể để server proxy set (CORS, referer…)
   const r = await fetch(url + (qs ? `?${qs}` : ""), { ...init, headers });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
@@ -67,7 +89,12 @@ function ColorNumber({ value, decimals = 2, suffix = "" }) {
   if (!Number.isFinite(value)) return <span className="dim">—</span>;
   const v = Number(value);
   const cls = v > 0 ? "num-pos" : v < 0 ? "num-neg" : "num-zero";
-  return <span className={cls}>{fmt(v, decimals)}{suffix}</span>;
+  return (
+    <span className={cls}>
+      {fmt(v, decimals)}
+      {suffix}
+    </span>
+  );
 }
 function ModeCell({ mode }) {
   const m = String(mode || "").toLowerCase();
@@ -99,7 +126,9 @@ function ApiKeyModal({ open, onClose }) {
       setValue(getInternalApiKey());
       setTimeout(() => inputRef.current?.focus(), 50);
       document.body.style.overflow = "hidden";
-      return () => { document.body.style.overflow = ""; };
+      return () => {
+        document.body.style.overflow = "";
+      };
     }
   }, [open]);
 
@@ -125,7 +154,9 @@ function ApiKeyModal({ open, onClose }) {
           Khóa này sẽ được lưu trong <code>localStorage</code> và tự động gắn vào header <code>x-api-key</code> cho mọi request.
         </p>
 
-        <label className="modal-label" htmlFor="apiKey">INTERNAL_API_KEY</label>
+        <label className="modal-label" htmlFor="apiKey">
+          INTERNAL_API_KEY
+        </label>
         <input
           id="apiKey"
           ref={inputRef}
@@ -137,10 +168,16 @@ function ApiKeyModal({ open, onClose }) {
         />
 
         <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={handleClear} title="Xóa key khỏi localStorage">Clear</button>
+          <button className="btn btn-ghost" onClick={handleClear} title="Xóa key khỏi localStorage">
+            Clear
+          </button>
           <div className="modal-actions-right">
-            <button className="btn btn-ghost" onClick={() => onClose?.(getInternalApiKey())}>Cancel</button>
-            <button className="btn btn-primary" onClick={handleSave}>Save Key</button>
+            <button className="btn btn-ghost" onClick={() => onClose?.(getInternalApiKey())}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" onClick={handleSave}>
+              Save Key
+            </button>
           </div>
         </div>
       </div>
@@ -152,21 +189,25 @@ function ApiKeyModal({ open, onClose }) {
 /** ===================== MAIN APP ===================== */
 export default function App() {
   const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);   // Refresh thủ công (1 pass)
+  const [loading, setLoading] = useState(false); // Refresh thủ công (1 pass)
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [error, setError] = useState("");
   const [aiResult, setAiResult] = useState("");
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [keyExists, setKeyExists] = useState(false);
 
+  // NEW: uid list động lấy từ API
+  const [uidList, setUidList] = useState([]);
+  const [uidLoading, setUidLoading] = useState(false);
+
   // id -> row
   const rowsMapRef = useRef(new Map());
   // symbol -> price
   const priceMapRef = useRef({});
 
+  // ========== Helpers ==========
   function getRowUid(r) {
-    return r?.raw?.traderUid != null ? String(r.raw.traderUid)
-      : (r?.uid != null ? String(r.uid) : "");
+    return r?.raw?.traderUid != null ? String(r.raw.traderUid) : r?.uid != null ? String(r.uid) : "";
   }
 
   function enrichWithLive(r, priceMap) {
@@ -174,21 +215,20 @@ export default function App() {
     const live = priceMap?.[r.symbol];
     const amount = num(r.amount);
 
-    const pnl = Number.isFinite(live) && Number.isFinite(open) && Number.isFinite(amount)
-      ? (live - open) * (String(r.mode).toLowerCase() === "long" ? 1 : -1) * amount
-      : NaN;
+    const pnl =
+      Number.isFinite(live) && Number.isFinite(open) && Number.isFinite(amount)
+        ? (live - open) * (String(r.mode).toLowerCase() === "long" ? 1 : -1) * amount
+        : NaN;
 
-    const roi = Number.isFinite(pnl) && Number.isFinite(num(r.margin)) && num(r.margin) !== 0
-      ? (pnl / num(r.margin)) * 100
-      : NaN;
+    const roi =
+      Number.isFinite(pnl) && Number.isFinite(num(r.margin)) && num(r.margin) !== 0
+        ? (pnl / num(r.margin)) * 100
+        : NaN;
 
-    const changePct = Number.isFinite(open) && Number.isFinite(live) && open !== 0
-      ? ((live - open) / open) * 100
-      : NaN;
+    const changePct =
+      Number.isFinite(open) && Number.isFinite(live) && open !== 0 ? ((live - open) / open) * 100 : NaN;
 
-    const openAtMs = r.openAt
-      ? new Date(r.openAt).getTime()
-      : (typeof r.openAtMs === "number" ? r.openAtMs : NaN);
+    const openAtMs = r.openAt ? new Date(r.openAt).getTime() : typeof r.openAtMs === "number" ? r.openAtMs : NaN;
 
     return {
       ...r,
@@ -241,9 +281,7 @@ export default function App() {
   const refreshPrices = async () => {
     try {
       const list = Array.from(rowsMapRef.current.values());
-      const needSymbols = [
-        ...new Set(list.filter((r) => !r.closeAvgPrice && r.symbol).map((r) => r.symbol)),
-      ];
+      const needSymbols = [...new Set(list.filter((r) => !r.closeAvgPrice && r.symbol).map((r) => r.symbol))];
       if (!needSymbols.length) return;
       const res = await fetchJSON(PRICES_API, { symbols: needSymbols.join(",") });
       if (res?.success && res?.prices) {
@@ -251,10 +289,50 @@ export default function App() {
         const list2 = list.map((r) => enrichWithLive(r, priceMapRef.current));
         setRows(list2);
       }
-    } catch {}
+    } catch { }
   };
 
-  // Vòng lặp vô tận: duyệt các batch (mỗi batch 3 UID)
+  // NEW: Lấy danh sách UIDs động qua proxy /api/call
+ const refreshUIDs = async () => {
+  setUidLoading(true);
+  setError("");
+  try {
+    // Call theo orderBy đang cấu hình (VD: ROI)
+    const urlPrimary = buildMexcTradersUrlWith(TRADERS_ORDER_BY);
+    const proxyPrimary = buildProxyCallUrl(urlPrimary);
+    const respPrimary = await fetchJSON(proxyPrimary, {});
+    const listPrimary =
+      (respPrimary?.data?.content || respPrimary?.content || [])
+        .map((it) => String(it?.uid))
+        .filter(Boolean);
+
+    // Call thêm orderBy=PNL
+    const urlPnl = buildMexcTradersUrlWith("PNL");
+    const proxyPnl = buildProxyCallUrl(urlPnl);
+    const respPnl = await fetchJSON(proxyPnl, {});
+    const listPnl =
+      (respPnl?.data?.content || respPnl?.content || [])
+        .map((it) => String(it?.uid))
+        .filter(Boolean);
+
+    // Gộp & loại trùng
+    const merged = Array.from(new Set([...(listPrimary || []), ...(listPnl || [])]));
+
+    if (!merged.length) {
+      throw new Error("Không lấy được UID từ traders API (primary + PNL).");
+    }
+
+    setUidList(merged);
+  } catch (e) {
+    setError(`Get UIDs error: ${e?.message || String(e)}`);
+  } finally {
+    setUidLoading(false);
+  }
+};
+
+
+
+  // Vòng lặp vô tận: duyệt các batch (mỗi batch 3 UID) dựa trên uidList động
   useEffect(() => {
     let cancelled = false;
 
@@ -263,9 +341,20 @@ export default function App() {
       setKeyExists(has);
       if (!has) setShowKeyModal(true);
 
-      const batches = chunk(UID_LIST, BATCH_SIZE);
+      // Lấy UIDs lúc khởi động (nếu chưa có)
+      if (!uidList.length) {
+        await refreshUIDs();
+      }
 
       while (!cancelled) {
+        const list = uidList.length ? uidList : [];
+        if (list.length === 0) {
+          // Nếu chưa có UIDs, đợi một chút rồi thử lại
+          await sleep(Math.max(POLL_MS, 2000));
+          continue;
+        }
+
+        const batches = chunk(list, BATCH_SIZE);
         for (const batch of batches) {
           if (cancelled) break;
           try {
@@ -280,13 +369,17 @@ export default function App() {
           }
           await sleep(PER_REQ_DELAY_MS);
         }
-        // hết vòng batches -> lặp lại
+        // hết vòng batches -> lặp lại; không auto đổi UIDs ở đây để tránh nhiễu
       }
     };
 
     startLoop();
-    return () => { cancelled = true; };
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+    // chỉ re-run khi uidList thay đổi (để vòng lặp đọc danh sách mới)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [uidList]);
 
   // Refresh giá theo chu kỳ
   useEffect(() => {
@@ -294,12 +387,17 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Refresh 1 pass toàn bộ bằng batch
+  // Refresh 1 pass toàn bộ bằng batch hiện tại
   const loadOnceAll = async () => {
     setLoading(true);
     setError("");
     try {
-      const batches = chunk(UID_LIST, BATCH_SIZE);
+      const list = uidList.length ? uidList : [];
+      if (!list.length) {
+        await refreshUIDs();
+      }
+      const list2 = uidList.length ? uidList : [];
+      const batches = chunk(list2, BATCH_SIZE);
       for (const batch of batches) {
         const uidsParam = batch.join(",");
         const data = await fetchJSON(ORDERS_API, { uids: uidsParam });
@@ -340,10 +438,7 @@ export default function App() {
   );
 
   // Sort mới -> cũ theo openAt
-  const sorted = useMemo(
-    () => [...rows].sort((a, b) => (Number(b.openAt) || 0) - (Number(a.openAt) || 0)),
-    [rows]
-  );
+  const sorted = useMemo(() => [...rows].sort((a, b) => (Number(b.openAt) || 0) - (Number(a.openAt) || 0)), [rows]);
 
   const runAI = async () => {
     try {
@@ -369,7 +464,10 @@ export default function App() {
   const runOrdersAI = async () => {
     try {
       const key = getInternalApiKey();
-      if (!key) { setShowKeyModal(true); return; }
+      if (!key) {
+        setShowKeyModal(true);
+        return;
+      }
       setOrdersLoading(true);
       setAiResult("Đang lấy lệnh và phân tích (Orders)…");
 
@@ -402,7 +500,10 @@ export default function App() {
 
   return (
     <div className="app">
-      <div className="header-actions" style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
+      <div
+        className="header-actions"
+        style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}
+      >
         <button className="btn" onClick={() => setShowKeyModal(true)} title="Set INTERNAL_API_KEY">
           {keyExists ? "Update Key" : "Set API Key"}
         </button>
@@ -416,14 +517,27 @@ export default function App() {
         <span
           className="inline-dot"
           style={{
-            width: 10, height: 10, borderRadius: "999px",
-            background: keyExists ? "#22c55e" : "#ef4444", display: "inline-block", marginLeft: 8
+            width: 10,
+            height: 10,
+            borderRadius: "999px",
+            background: keyExists ? "#22c55e" : "#ef4444",
+            display: "inline-block",
+            marginLeft: 8,
           }}
           title={keyExists ? "API key loaded" : "Missing API key"}
         />
+
         <button className="btn" onClick={loadOnceAll} disabled={loading}>
           {loading ? "Loading..." : "Refresh"}
         </button>
+
+        {/* NEW: nút refresh UIDs động */}
+        <button className="btn" onClick={refreshUIDs} disabled={uidLoading}>
+          {uidLoading ? "Fetching UIDs…" : "Refresh UIDs"}
+        </button>
+
+        {/* hiển thị số lượng UID hiện có */}
+        <span style={{ opacity: 0.8, fontSize: 12 }}>UIDs: {uidList.length}</span>
       </div>
 
       {aiResult && (
@@ -433,8 +547,17 @@ export default function App() {
             aria-label="Close AI result"
             onClick={() => setAiResult("")}
             title="Đóng kết quả AI"
-            style={{ position: "absolute", top: 0, right: 8, border: "none", background: "transparent",
-                     fontSize: 30, lineHeight: 1, cursor: "pointer", opacity: 0.65 }}
+            style={{
+              position: "absolute",
+              top: 0,
+              right: 8,
+              border: "none",
+              background: "transparent",
+              fontSize: 30,
+              lineHeight: 1,
+              cursor: "pointer",
+              opacity: 0.65,
+            }}
             onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
             onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.65")}
           >
@@ -449,7 +572,10 @@ export default function App() {
       )}
 
       {error && (
-        <div className="card" style={{ padding: 12, borderColor: "#7a2d2d", background: "#26161a", color: "#ffb4b4", marginBottom: 12 }}>
+        <div
+          className="card"
+          style={{ padding: 12, borderColor: "#7a2d2d", background: "#26161a", color: "#ffb4b4", marginBottom: 12 }}
+        >
           {error}
         </div>
       )}
@@ -458,7 +584,7 @@ export default function App() {
         <div className="table-wrap">
           <table className="table">
             <thead>
-              <tr>{columns.map((c) => (<th key={c.header}>{c.header}</th>))}</tr>
+              <tr>{columns.map((c) => <th key={c.header}>{c.header}</th>)}</tr>
             </thead>
             <tbody>
               {sorted.map((r) => (
@@ -480,6 +606,13 @@ export default function App() {
                   ))}
                 </tr>
               ))}
+              {!sorted.length && (
+                <tr>
+                  <td colSpan={columns.length} style={{ opacity: 0.75, padding: 20 }}>
+                    {uidLoading ? "Đang tải UIDs…" : "Chưa có dữ liệu. Hãy bấm “Refresh UIDs” hoặc “Refresh”."}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
