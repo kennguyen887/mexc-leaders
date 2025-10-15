@@ -20,7 +20,7 @@ const BATCH_SIZE = Number(import.meta.env.VITE_BATCH_SIZE || 3);              //
 
 // ==== Tham số chọn trader từ MEXC (có thể override bằng .env) ====
 const TRADERS_INTERVAL = import.meta.env.VITE_TRADERS_INTERVAL || "ALL";
-const TRADERS_LIMIT = Number(import.meta.env.VITE_TRADERS_LIMIT || 150);
+const TRADERS_LIMIT = Number(import.meta.env.VITE_TRADERS_LIMIT || 100);
 const TRADERS_ORDER_BY = import.meta.env.VITE_TRADERS_ORDER_BY || "ROI";
 const TRADERS_PAGE = Number(import.meta.env.VITE_TRADERS_PAGE || 1);
 
