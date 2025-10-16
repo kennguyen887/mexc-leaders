@@ -21,7 +21,6 @@ const BATCH_SIZE = Number(import.meta.env.VITE_BATCH_SIZE || 3);              //
 // ==== Tham số chọn trader từ MEXC (có thể override bằng .env) ====
 const TRADERS_INTERVAL = import.meta.env.VITE_TRADERS_INTERVAL || "ALL";
 const TRADERS_LIMIT = Number(import.meta.env.VITE_TRADERS_LIMIT || 100);
-const TRADERS_ORDER_BY = import.meta.env.VITE_TRADERS_ORDER_BY || "ROI";
 const TRADERS_PAGE = Number(import.meta.env.VITE_TRADERS_PAGE || 1);
 
 // Xây URL gốc của MEXC theo rule bạn đã dùng trong cURL
@@ -30,7 +29,7 @@ function buildMexcTradersUrlWith(orderBy) {
   const params = new URLSearchParams({
     intervalType: TRADERS_INTERVAL,
     limit: String(TRADERS_LIMIT),
-    orderBy: orderBy || TRADERS_ORDER_BY,
+    orderBy: orderBy,
     page: String(TRADERS_PAGE),
   });
   return `${base}?${params.toString()}`;
@@ -297,29 +296,29 @@ export default function App() {
   setUidLoading(true);
   setError("");
   try {
-    // Call theo orderBy đang cấu hình (VD: ROI)
-    const urlPrimary = buildMexcTradersUrlWith(TRADERS_ORDER_BY);
-    const proxyPrimary = buildProxyCallUrl(urlPrimary);
-    const respPrimary = await fetchJSON(proxyPrimary, {});
-    const listPrimary =
-      (respPrimary?.data?.content || respPrimary?.content || [])
-        .map((it) => String(it?.uid))
-        .filter(Boolean);
+    // Danh sách orderBy cần lấy (có thể mở rộng)
+    const orderBys = ["ROI", "PNL", "WIN_RATE", "FOLLOWERS"];
+    const allUIDs = [];
 
-    // Call thêm orderBy=PNL
-    const urlPnl = buildMexcTradersUrlWith("PNL");
-    const proxyPnl = buildProxyCallUrl(urlPnl);
-    const respPnl = await fetchJSON(proxyPnl, {});
-    const listPnl =
-      (respPnl?.data?.content || respPnl?.content || [])
-        .map((it) => String(it?.uid))
-        .filter(Boolean);
+    for (const orderBy of orderBys) {
+      try {
+        const url = buildMexcTradersUrlWith(orderBy);
+        const proxyUrl = buildProxyCallUrl(url);
+        const resp = await fetchJSON(proxyUrl, {});
+        const content = resp?.data?.content || resp?.content || [];
+        const list = content.map((it) => String(it?.uid)).filter(Boolean);
+        allUIDs.push(...list);
+      } catch (innerErr) {
+        console.warn(`⚠️ Fetch traders failed (${orderBy}):`, innerErr);
+      }
+      // nhẹ delay giữa mỗi request để tránh bị chặn
+      await sleep(300);
+    }
 
-    // Gộp & loại trùng
-    const merged = Array.from(new Set([...(listPrimary || []), ...(listPnl || [])]));
+    const merged = Array.from(new Set(allUIDs)); // loại trùng UID
 
     if (!merged.length) {
-      throw new Error("Không lấy được UID từ traders API (primary + PNL).");
+      throw new Error("Không lấy được UID từ traders API (ROI/PNL/WIN_RATE/FOLLOWERS)");
     }
 
     setUidList(merged);
@@ -329,6 +328,7 @@ export default function App() {
     setUidLoading(false);
   }
 };
+
 
 
 
