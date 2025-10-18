@@ -16,7 +16,7 @@ const ORDERS_AI_API =
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 3000);
 const TIMEZONE = "Asia/Ho_Chi_Minh";
 const PER_REQ_DELAY_MS = Number(import.meta.env.VITE_PER_REQ_DELAY_MS || 90); // delay giữa các request
-const BATCH_SIZE = Number(import.meta.env.VITE_BATCH_SIZE || 3);              // mỗi request gồm 3 UID
+const BATCH_SIZE = Number(import.meta.env.VITE_BATCH_SIZE || 3); // mỗi request gồm 3 UID
 
 // ==== Tham số chọn trader từ MEXC (có thể override bằng .env) ====
 const TRADERS_INTERVAL = import.meta.env.VITE_TRADERS_INTERVAL || "ALL";
@@ -49,11 +49,11 @@ const fmt = (n, d = 2) =>
   Number.isFinite(n) ? n.toLocaleString(undefined, { maximumFractionDigits: d }) : n;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const chunk = (arr, size) => {
+function chunk(arr, size) {
   const out = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;
-};
+}
 
 /** ===================== API KEY (localStorage) ===================== */
 const STORAGE_KEY = "internal_api_key";
@@ -68,7 +68,7 @@ function setInternalApiKey(key) {
   try {
     if (key && typeof key === "string") window.localStorage.setItem(STORAGE_KEY, key);
     else window.localStorage.removeItem(STORAGE_KEY);
-  } catch { }
+  } catch {}
 }
 
 /** fetch JSON helper với header x-api-key tự động */
@@ -77,7 +77,6 @@ async function fetchJSON(url, params = {}, init = {}) {
   const key = getInternalApiKey();
   const headers = new Headers(init.headers || {});
   if (key) headers.set("x-api-key", key);
-  // các header khác có thể để server proxy set (CORS, referer…)
   const r = await fetch(url + (qs ? `?${qs}` : ""), { ...init, headers });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
@@ -188,7 +187,6 @@ function ApiKeyModal({ open, onClose }) {
 /** ===================== MAIN APP ===================== */
 export default function App() {
   const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false); // Refresh thủ công (1 pass)
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [error, setError] = useState("");
   const [aiResult, setAiResult] = useState("");
@@ -198,6 +196,9 @@ export default function App() {
   // NEW: uid list động lấy từ API
   const [uidList, setUidList] = useState([]);
   const [uidLoading, setUidLoading] = useState(false);
+
+  // NEW: toggle ẩn/hiện PNL âm
+  const [showNegativePNL, setShowNegativePNL] = useState(true);
 
   // id -> row
   const rowsMapRef = useRef(new Map());
@@ -254,7 +255,7 @@ export default function App() {
       uidToIds.get(uid).add(r.id);
     }
 
-    // PRUNE: với mọi row có UID thuộc batch nhưng id không nằm trong response uid->ids thì delete
+    // PRUNE
     for (const [id, row] of m.entries()) {
       const uid = getRowUid(row);
       if (!uid || !batchSet.has(uid)) continue;
@@ -264,7 +265,7 @@ export default function App() {
       }
     }
 
-    // UPSERT: merge theo id
+    // UPSERT
     for (const r of Array.isArray(arr) ? arr : []) {
       const existing = m.get(r.id);
       const merged = { ...(existing || {}), ...r };
@@ -274,6 +275,41 @@ export default function App() {
 
     // Rebuild list
     setRows(Array.from(m.values()));
+  };
+
+  // === VIP UIDs (string để giữ leading zero)
+  const VIP_UIDS = [
+    "28905362","71312117","87698388","20393898","61775694","58298982","01086225","74785697","90901845","23747691",
+    "15480060","22247145","80778881","54447554","98086898","93765871","85581052","42806597","8197321","64877108",
+    "7981129","89989257","13040215","70798336","07695752","07867898", "91401780", "98695755", "94299227", "63070731", "77587922"
+  ];
+  const VIP_SET = useMemo(() => new Set(VIP_UIDS), []);
+
+  const iconForPNL = (pnl) => {
+    if (pnl > 2000) return "🔥";
+    if (pnl > 1000) return "💰";
+    if (pnl > 500) return "🟢";
+    if (pnl > 7000) return "💎";
+    if (pnl > 3000) return "";
+    
+  
+    return "";
+  };
+
+  const iconForMargin = (margin) => {
+    if (margin > 10000) return "🏦";
+    if (margin > 5000) return "💎";
+    if (margin > 2000) return "📈";
+    if (margin > 1000) return "💼";
+    return "";
+  };
+
+  const iconForROI = (roi) => {
+    if (roi > 100) return "🚀";
+    if (roi > 60) return "🔥";
+    if (roi > 30) return "💰";
+    if (roi > 10) return "🟢";
+    return "";
   };
 
   // Giá thị trường định kỳ
@@ -288,49 +324,42 @@ export default function App() {
         const list2 = list.map((r) => enrichWithLive(r, priceMapRef.current));
         setRows(list2);
       }
-    } catch { }
+    } catch {}
   };
 
   // NEW: Lấy danh sách UIDs động qua proxy /api/call
- const refreshUIDs = async () => {
-  setUidLoading(true);
-  setError("");
-  try {
-    // Danh sách orderBy cần lấy (có thể mở rộng)
-    const orderBys = ["ROI", "PNL", "WIN_RATE", "FOLLOWERS"];
-    const allUIDs = [];
+  const refreshUIDs = async () => {
+    setUidLoading(true);
+    setError("");
+    try {
+      const orderBys = ["ROI", "PNL", "WIN_RATE", "FOLLOWERS"];
+      const allUIDs = [];
 
-    for (const orderBy of orderBys) {
-      try {
-        const url = buildMexcTradersUrlWith(orderBy);
-        const proxyUrl = buildProxyCallUrl(url);
-        const resp = await fetchJSON(proxyUrl, {});
-        const content = resp?.data?.content || resp?.content || [];
-        const list = content.map((it) => String(it?.uid)).filter(Boolean);
-        allUIDs.push(...list);
-      } catch (innerErr) {
-        console.warn(`⚠️ Fetch traders failed (${orderBy}):`, innerErr);
+      for (const orderBy of orderBys) {
+        try {
+          const url = buildMexcTradersUrlWith(orderBy);
+          const proxyUrl = buildProxyCallUrl(url);
+          const resp = await fetchJSON(proxyUrl, {});
+          const content = resp?.data?.content || resp?.content || [];
+          const list = content.map((it) => String(it?.uid)).filter(Boolean);
+          allUIDs.push(...list);
+        } catch (innerErr) {
+          console.warn(`⚠️ Fetch traders failed (${orderBy}):`, innerErr);
+        }
+        await sleep(300);
       }
-      // nhẹ delay giữa mỗi request để tránh bị chặn
-      await sleep(300);
+
+      const merged = Array.from(new Set(allUIDs)); // loại trùng UID
+      if (!merged.length) {
+        throw new Error("Không lấy được UID từ traders API (ROI/PNL/WIN_RATE/FOLLOWERS)");
+      }
+      setUidList(merged);
+    } catch (e) {
+      setError(`Get UIDs error: ${e?.message || String(e)}`);
+    } finally {
+      setUidLoading(false);
     }
-
-    const merged = Array.from(new Set(allUIDs)); // loại trùng UID
-
-    if (!merged.length) {
-      throw new Error("Không lấy được UID từ traders API (ROI/PNL/WIN_RATE/FOLLOWERS)");
-    }
-
-    setUidList(merged);
-  } catch (e) {
-    setError(`Get UIDs error: ${e?.message || String(e)}`);
-  } finally {
-    setUidLoading(false);
-  }
-};
-
-
-
+  };
 
   // Vòng lặp vô tận: duyệt các batch (mỗi batch 3 UID) dựa trên uidList động
   useEffect(() => {
@@ -341,7 +370,6 @@ export default function App() {
       setKeyExists(has);
       if (!has) setShowKeyModal(true);
 
-      // Lấy UIDs lúc khởi động (nếu chưa có)
       if (!uidList.length) {
         await refreshUIDs();
       }
@@ -349,7 +377,6 @@ export default function App() {
       while (!cancelled) {
         const list = uidList.length ? uidList : [];
         if (list.length === 0) {
-          // Nếu chưa có UIDs, đợi một chút rồi thử lại
           await sleep(Math.max(POLL_MS, 2000));
           continue;
         }
@@ -369,7 +396,7 @@ export default function App() {
           }
           await sleep(PER_REQ_DELAY_MS);
         }
-        // hết vòng batches -> lặp lại; không auto đổi UIDs ở đây để tránh nhiễu
+        // lặp lại: không đổi UIDs tự động
       }
     };
 
@@ -377,7 +404,6 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-    // chỉ re-run khi uidList thay đổi (để vòng lặp đọc danh sách mới)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uidList]);
 
@@ -387,59 +413,91 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  // Refresh 1 pass toàn bộ bằng batch hiện tại
-  const loadOnceAll = async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const list = uidList.length ? uidList : [];
-      if (!list.length) {
-        await refreshUIDs();
-      }
-      const list2 = uidList.length ? uidList : [];
-      const batches = chunk(list2, BATCH_SIZE);
-      for (const batch of batches) {
-        const uidsParam = batch.join(",");
-        const data = await fetchJSON(ORDERS_API, { uids: uidsParam });
-        if (data?.success) {
-          upsertAndPruneBatch(Array.isArray(data.data) ? data.data : [], batch);
-        }
-        await sleep(PER_REQ_DELAY_MS);
-      }
-      await refreshPrices();
-    } catch (e) {
-      setError(e.message || String(e));
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // ========== COLUMNS (đưa icon vào get(...) luôn, bọc trong <span>) ==========
   const columns = useMemo(
     () => [
-      { header: "Trader", get: (r) => r.trader ?? "" },
+      {
+        header: "Trader",
+        get: (r) => {
+          const uidStr = getRowUid(r);
+          const name = r.trader ?? "";
+          return VIP_SET.has(uidStr) ? `${name} ⭐` : name;
+        },
+      },
       { header: "Symbol", get: (r) => r.symbol ?? "" },
-      { header: "Mode", get: (r) => (r.mode ? r.mode : "") },
+      {
+        header: "Mode",
+        get: (r) => <ModeCell mode={r.mode} />,
+      },
       { header: "Lev", get: (r) => (r.lev ? `${fmt(num(r.lev), 0)}x` : "") },
       { header: "Margin Mode", get: (r) => r.marginMode ?? "" },
-      { header: "PNL (USDT)", get: (r) => (Number.isFinite(r.__pnl) ? fmt(num(r.__pnl), 2) : "") },
-      { header: "ROI %", get: (r) => (Number.isFinite(r.__roi) ? `${fmt(num(r.__roi), 2)}%` : "") },
+      {
+        header: "PNL (USDT)",
+        get: (r) => {
+          const pnl = num(r.__pnl);
+          if (!Number.isFinite(pnl)) return <span className="dim">—</span>;
+          return (
+            <span>
+              <ColorNumber value={pnl} decimals={2} /> {iconForPNL(pnl)}
+            </span>
+          );
+        },
+      },
+      {
+        header: "ROI %",
+        get: (r) => {
+          const roi = num(r.__roi);
+          if (!Number.isFinite(roi)) return <span className="dim">—</span>;
+          return (
+            <span>
+              <ColorNumber value={roi} decimals={2} suffix="%" /> {iconForROI(roi)}
+            </span>
+          );
+        },
+      },
       { header: "Open Price", get: (r) => fmt(num(r.openPrice), 6) },
       { header: "Market Price", get: (r) => fmt(num(r.__marketPrice), 6) },
-      { header: "Δ % vs Open", get: (r) => `${fmt(num(r.__changePct), 2)}%` },
+      {
+        header: "Δ % vs Open",
+        get: (r) => <ColorNumber value={num(r.__changePct)} decimals={2} suffix="%" />,
+      },
       { header: "Amount", get: (r) => fmt(num(r.amount), 4) },
-      { header: "Margin (USDT)", get: (r) => fmt(num(r.margin), 4) },
+      {
+        header: "Margin (USDT)",
+        get: (r) => {
+          const margin = num(r.margin);
+          if (!Number.isFinite(margin)) return <span className="dim">—</span>;
+          return (
+            <span>
+              {fmt(margin, 2)} {iconForMargin(margin)}
+            </span>
+          );
+        },
+      },
       { header: "Notional (USDT)", get: (r) => fmt(num(r.notional), 2) },
       { header: "Open At (VNT)", get: (r) => r.openAtStr || tsVNT(r.openAt) },
       { header: "Margin %", get: (r) => `${fmt(num(r.marginPct), 2)}%` },
       { header: "Followers", get: (r) => r.followers ?? "" },
-      { header: "UID", get: (r) => (r.raw?.traderUid != null ? String(r.raw.traderUid) : "") },
+      {
+        header: "UID",
+        get: (r) => getRowUid(r),
+      },
     ],
-    []
+    [] // deps rỗng
   );
 
-  // Sort mới -> cũ theo openAt
-  const sorted = useMemo(() => [...rows].sort((a, b) => (Number(b.openAt) || 0) - (Number(a.openAt) || 0)), [rows]);
+  // ========== FILTER & SORT ==========
+  const filtered = useMemo(
+    () => (showNegativePNL ? rows : rows.filter((r) => Number(r.__pnl) >= 0)),
+    [rows, showNegativePNL]
+  );
 
+  const sorted = useMemo(
+    () => [...filtered].sort((a, b) => (Number(b.openAt) || 0) - (Number(a.openAt) || 0)),
+    [filtered]
+  );
+
+  // ========== AI Actions ==========
   const runAI = async () => {
     try {
       setAiResult("Đang phân tích...");
@@ -527,13 +585,22 @@ export default function App() {
           title={keyExists ? "API key loaded" : "Missing API key"}
         />
 
-        <button className="btn" onClick={loadOnceAll} disabled={loading}>
-          {loading ? "Loading..." : "Refresh"}
-        </button>
+        {/* ❌ ĐÃ BỎ NÚT REFRESH TOÀN BỘ */}
 
-        {/* NEW: nút refresh UIDs động */}
         <button className="btn" onClick={refreshUIDs} disabled={uidLoading}>
           {uidLoading ? "Fetching UIDs…" : "Refresh UIDs"}
+        </button>
+
+        {/* ✅ Nút bật/tắt hiển thị PNL âm */}
+        <button
+          className="btn"
+          style={{
+            background: showNegativePNL ? "#374151" : "#15803d",
+            color: "#fff",
+          }}
+          onClick={() => setShowNegativePNL(!showNegativePNL)}
+        >
+          {showNegativePNL ? "Hide -PNL" : "Show -PNL"}
         </button>
 
         {/* hiển thị số lượng UID hiện có */}
@@ -590,26 +657,14 @@ export default function App() {
               {sorted.map((r) => (
                 <tr key={r.id}>
                   {columns.map((c) => (
-                    <td key={c.header}>
-                      {c.header === "PNL (USDT)" ? (
-                        <ColorNumber value={r.__pnl} decimals={2} />
-                      ) : c.header === "ROI %" ? (
-                        <ColorNumber value={r.__roi} decimals={2} suffix="%" />
-                      ) : c.header === "Δ % vs Open" ? (
-                        <ColorNumber value={r.__changePct} decimals={2} suffix="%" />
-                      ) : c.header === "Mode" ? (
-                        <ModeCell mode={r.mode} />
-                      ) : (
-                        c.get(r)
-                      )}
-                    </td>
+                    <td key={c.header}>{c.get(r)}</td>
                   ))}
                 </tr>
               ))}
               {!sorted.length && (
                 <tr>
                   <td colSpan={columns.length} style={{ opacity: 0.75, padding: 20 }}>
-                    {uidLoading ? "Đang tải UIDs…" : "Chưa có dữ liệu. Hãy bấm “Refresh UIDs” hoặc “Refresh”."}
+                    {uidLoading ? "Đang tải UIDs…" : "Chưa có dữ liệu. Hãy bấm “Refresh UIDs” hoặc chờ vòng lặp tự cập nhật."}
                   </td>
                 </tr>
               )}
