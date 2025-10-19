@@ -68,7 +68,7 @@ function setInternalApiKey(key) {
   try {
     if (key && typeof key === "string") window.localStorage.setItem(STORAGE_KEY, key);
     else window.localStorage.removeItem(STORAGE_KEY);
-  } catch {}
+  } catch { }
 }
 
 /** fetch JSON helper với header x-api-key tự động */
@@ -279,9 +279,9 @@ export default function App() {
 
   // === VIP UIDs (string để giữ leading zero)
   const VIP_UIDS = [
-    "28905362","71312117","87698388","20393898","61775694","58298982","01086225","74785697","90901845","23747691",
-    "15480060","22247145","80778881","54447554","98086898","93765871","85581052","42806597","8197321","64877108",
-    "7981129","89989257","13040215","70798336","07695752","07867898", "91401780", "98695755", "94299227", "63070731", "77587922"
+    "28905362", "71312117", "87698388", "20393898", "61775694", "58298982", "01086225", "74785697", "90901845", "23747691",
+    "15480060", "22247145", "80778881", "54447554", "98086898", "93765871", "85581052", "42806597", "8197321", "64877108",
+    "7981129", "89989257", "13040215", "70798336", "07695752", "07867898", "91401780", "98695755", "94299227", "63070731", "77587922"
   ];
   const VIP_SET = useMemo(() => new Set(VIP_UIDS), []);
 
@@ -291,8 +291,8 @@ export default function App() {
     if (pnl > 500) return "🟢";
     if (pnl > 7000) return "💎";
     if (pnl > 3000) return "";
-    
-  
+
+
     return "";
   };
 
@@ -324,7 +324,7 @@ export default function App() {
         const list2 = list.map((r) => enrichWithLive(r, priceMapRef.current));
         setRows(list2);
       }
-    } catch {}
+    } catch { }
   };
 
   // NEW: Lấy danh sách UIDs động qua proxy /api/call
@@ -421,18 +421,38 @@ export default function App() {
         get: (r) => {
           const uidStr = getRowUid(r);
           const name = r.trader ?? "";
-          return VIP_SET.has(uidStr) ? `${name} ⭐` : name;
+          const isVip = VIP_SET.has(uidStr);
+
+          const truncated = name.length > 10 ? name.slice(0, 10) + "…" : name;
+
+          return (
+            <>
+              <span className="name-6ch" title={name}>{truncated}</span>
+              {isVip ? " ⭐" : ""}
+            </>
+          );
+        },
+      }
+      ,
+      {
+        header: "Symbol", get: (r) => {
+          return r.symbol.slice(0, 8) ?? "";
+        }
+      },
+      {
+        header: "Margin",
+        get: (r) => {
+          const margin = num(r.margin);
+          if (!Number.isFinite(margin)) return <span className="dim">—</span>;
+          return (
+            <span>
+              {fmt(margin, 2)} {iconForMargin(margin)}
+            </span>
+          );
         },
       },
-      { header: "Symbol", get: (r) => r.symbol ?? "" },
       {
-        header: "Mode",
-        get: (r) => <ModeCell mode={r.mode} />,
-      },
-      { header: "Lev", get: (r) => (r.lev ? `${fmt(num(r.lev), 0)}x` : "") },
-      { header: "Margin Mode", get: (r) => r.marginMode ?? "" },
-      {
-        header: "PNL (USDT)",
+        header: "PNL",
         get: (r) => {
           const pnl = num(r.__pnl);
           if (!Number.isFinite(pnl)) return <span className="dim">—</span>;
@@ -443,6 +463,7 @@ export default function App() {
           );
         },
       },
+      { header: "Lev", get: (r) => (r.lev ? `${fmt(num(r.lev), 0)}x` : "") },
       {
         header: "ROI %",
         get: (r) => {
@@ -455,6 +476,15 @@ export default function App() {
           );
         },
       },
+
+      {
+        header: "Mode",
+        get: (r) => <ModeCell mode={r.mode} />,
+      },
+
+      { header: "Margin Mode", get: (r) => r.marginMode ?? "" },
+      { header: "Notional (USDT)", get: (r) => fmt(num(r.notional), 2) },
+
       { header: "Open Price", get: (r) => fmt(num(r.openPrice), 6) },
       { header: "Market Price", get: (r) => fmt(num(r.__marketPrice), 6) },
       {
@@ -462,19 +492,6 @@ export default function App() {
         get: (r) => <ColorNumber value={num(r.__changePct)} decimals={2} suffix="%" />,
       },
       { header: "Amount", get: (r) => fmt(num(r.amount), 4) },
-      {
-        header: "Margin (USDT)",
-        get: (r) => {
-          const margin = num(r.margin);
-          if (!Number.isFinite(margin)) return <span className="dim">—</span>;
-          return (
-            <span>
-              {fmt(margin, 2)} {iconForMargin(margin)}
-            </span>
-          );
-        },
-      },
-      { header: "Notional (USDT)", get: (r) => fmt(num(r.notional), 2) },
       { header: "Open At (VNT)", get: (r) => r.openAtStr || tsVNT(r.openAt) },
       { header: "Margin %", get: (r) => `${fmt(num(r.marginPct), 2)}%` },
       { header: "Followers", get: (r) => r.followers ?? "" },

@@ -199,3 +199,11 @@ body, #root{ height: 100%; margin: 0; background: var(--bg); color: var(--text);
 }
 .btn-primary:hover { background: #0b0b0b; }
 .btn-ghost { background: transparent; color: #fff; border: 0px; }
+.name-6ch {
+  display: inline-block;
+  max-width: 10ch;          /* đúng 6 ký tự chiều rộng */
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis; /* phòng khi font biến thiên */
+  vertical-align: bottom;
+}
