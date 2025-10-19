@@ -41,8 +41,22 @@ function buildProxyCallUrl(callUrl) {
   return u.toString();
 }
 
-const tsVNT = (t) =>
-  t ? new Date(t).toLocaleString("en-GB", { timeZone: TIMEZONE, hour12: false }).replace(",", "") : "";
+const tsVNT = (t) => {
+  if (!t) return "";
+  const diff = Date.now() - new Date(t).getTime();
+  if (diff < 0) return "just now";
+
+  const s = Math.floor(diff / 1000);
+  const m = Math.floor(s / 60);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+
+  if (d > 0) return `${d}d ${h % 24 ? h % 24 + "h" : ""} ago`;
+  if (h > 0) return `${h}h${m % 60 ? m % 60 + "m" : ""} ago`;
+  if (m > 0) return `${m}m${s % 60 ? s % 60 + "s" : ""} ago`;
+  if (s > 5) return `${s}s ago`;
+  return "just now";
+};
 
 const num = (x) => (typeof x === "number" ? x : Number(x || 0));
 const fmt = (n, d = 2) =>
@@ -87,13 +101,26 @@ function ColorNumber({ value, decimals = 2, suffix = "" }) {
   if (!Number.isFinite(value)) return <span className="dim">—</span>;
   const v = Number(value);
   const cls = v > 0 ? "num-pos" : v < 0 ? "num-neg" : "num-zero";
+
+  const abs = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  let shortVal;
+
+  if (abs >= 1_000_000_000) shortVal = (abs / 1_000_000_000).toFixed(1).replace(/\.0$/, "") + "B";
+  else if (abs >= 1_000_000) shortVal = (abs / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+  else if (abs >= 1_000) shortVal = (abs / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
+  else shortVal = fmt(abs, decimals); // ✅ chỉ format abs, không còn dấu -
+
   return (
     <span className={cls}>
-      {fmt(v, decimals)}
+      {sign}
+      {shortVal}
       {suffix}
     </span>
   );
 }
+
+
 function ModeCell({ mode }) {
   const m = String(mode || "").toLowerCase();
   const cls = m === "long" ? "mode-long" : m === "short" ? "mode-short" : "";
@@ -209,6 +236,20 @@ export default function App() {
   function getRowUid(r) {
     return r?.raw?.traderUid != null ? String(r.raw.traderUid) : r?.uid != null ? String(r.uid) : "";
   }
+  const fmtShort = (n) => {
+    if (!Number.isFinite(n)) return "—";
+    const abs = Math.abs(n);
+    const sign = n < 0 ? "-" : "";
+    if (abs >= 1_000_000_000)
+      return sign + (abs / 1_000_000_000).toFixed(1).replace(/\.0$/, "") + "B";
+    if (abs >= 1_000_000)
+      return sign + (abs / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+    if (abs >= 1_000)
+      return sign + (abs / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
+    // ✅ Giữ 2 chữ số thập phân cho số nhỏ
+    return sign + abs.toFixed(3).replace(/\.00$/, "");
+  };
+
 
   function enrichWithLive(r, priceMap) {
     const open = num(r.openPrice);
@@ -423,8 +464,11 @@ export default function App() {
           const name = r.trader ?? "";
           const isVip = VIP_SET.has(uidStr);
 
-          const truncated = name.length > 10 ? name.slice(0, 10) + "…" : name;
-
+          // Giữ 4 ký tự đầu + 2 ký tự cuối
+          const truncated =
+            name.length > 6
+              ? `${name.slice(0, 4)}…${name.slice(-2)}`
+              : name;
           return (
             <>
               <span className="name-6ch" title={name}>{truncated}</span>
@@ -439,6 +483,12 @@ export default function App() {
           return r.symbol.slice(0, 8) ?? "";
         }
       },
+
+      {
+        header: "Mode",
+        get: (r) => <ModeCell mode={r.mode} />,
+      },
+
       {
         header: "Margin",
         get: (r) => {
@@ -446,11 +496,12 @@ export default function App() {
           if (!Number.isFinite(margin)) return <span className="dim">—</span>;
           return (
             <span>
-              {fmt(margin, 2)} {iconForMargin(margin)}
+              <ColorNumber value={margin} decimals={2} /> {iconForMargin(margin)}
             </span>
           );
         },
       },
+
       {
         header: "PNL",
         get: (r) => {
@@ -458,12 +509,13 @@ export default function App() {
           if (!Number.isFinite(pnl)) return <span className="dim">—</span>;
           return (
             <span>
-              <ColorNumber value={pnl} decimals={2} /> {iconForPNL(pnl)}
+              <ColorNumber value={pnl} decimals={2} />{iconForPNL(pnl)}
             </span>
           );
         },
       },
       { header: "Lev", get: (r) => (r.lev ? `${fmt(num(r.lev), 0)}x` : "") },
+      { header: "At VNT", get: (r) => r.openAtStr || tsVNT(r.openAt) },
       {
         header: "ROI %",
         get: (r) => {
@@ -477,22 +529,17 @@ export default function App() {
         },
       },
 
-      {
-        header: "Mode",
-        get: (r) => <ModeCell mode={r.mode} />,
-      },
+      { header: "M/Mode", get: (r) => r.marginMode ?? "" },
+      { header: "Notional", get: (r) => fmtShort(num(r.notional), 2) },
 
-      { header: "Margin Mode", get: (r) => r.marginMode ?? "" },
-      { header: "Notional (USDT)", get: (r) => fmt(num(r.notional), 2) },
-
-      { header: "Open Price", get: (r) => fmt(num(r.openPrice), 6) },
-      { header: "Market Price", get: (r) => fmt(num(r.__marketPrice), 6) },
+      { header: "Open Price", get: (r) => fmtShort(num(r.openPrice), 4) },
+      { header: "Market Price", get: (r) => fmtShort(num(r.__marketPrice), 4) },
       {
         header: "Δ % vs Open",
         get: (r) => <ColorNumber value={num(r.__changePct)} decimals={2} suffix="%" />,
       },
-      { header: "Amount", get: (r) => fmt(num(r.amount), 4) },
-      { header: "Open At (VNT)", get: (r) => r.openAtStr || tsVNT(r.openAt) },
+      { header: "Amount", get: (r) => fmtShort(num(r.amount), 3) },
+
       { header: "Margin %", get: (r) => `${fmt(num(r.marginPct), 2)}%` },
       { header: "Followers", get: (r) => r.followers ?? "" },
       {
