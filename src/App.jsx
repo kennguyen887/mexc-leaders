@@ -530,6 +530,7 @@ export default function App() {
       },
 
       { header: "M/Mode", get: (r) => r.marginMode ?? "" },
+      { header: "Followers", get: (r) => r.followers ?? "" },
       { header: "Notional", get: (r) => fmtShort(num(r.notional), 2) },
 
       { header: "Open Price", get: (r) => fmtShort(num(r.openPrice), 4) },
@@ -541,7 +542,7 @@ export default function App() {
       { header: "Amount", get: (r) => fmtShort(num(r.amount), 3) },
 
       { header: "Margin %", get: (r) => `${fmt(num(r.marginPct), 2)}%` },
-      { header: "Followers", get: (r) => r.followers ?? "" },
+
       {
         header: "UID",
         get: (r) => getRowUid(r),
