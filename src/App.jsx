@@ -517,6 +517,11 @@ export default function App() {
         get: (r) => getRowUid(r),
         csv: (r) => getRowUid(r),
       },
+           {
+        header: "ID",
+        get: (r) => r.id ?? "",
+        csv: (r) => r.id ?? "",
+      },
     ],
     []
   );
@@ -702,10 +707,3 @@ export default function App() {
     </div>
   );
 }
-{success: false,…}
-error
-: 
-"OpenAI error: {\"error\":{\"code\":\"unsupported_country_region_territory\",\"message\":\"Country, region, or territory not supported\",\"param\":null,\"type\":\"request_forbidden\"}}"
-success
-: 
-false
