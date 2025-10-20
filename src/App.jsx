@@ -627,7 +627,7 @@ export default function App() {
       </div>
 
       {aiResult && (
-        <div className="card" style={{ maxWidth: 1300, marginBottom: 12, paddingLeft: 12, position: "relative" }}>
+        <div className="card" style={{ marginRight: 12, marginBottom: 12, paddingLeft: 12, position: "relative" }}>
           <button
             className="btn-icon close"
             aria-label="Close AI result"
