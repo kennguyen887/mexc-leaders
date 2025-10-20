@@ -15,15 +15,13 @@ const ORDERS_AI_API =
 
 const POLL_MS = Number(import.meta.env.VITE_POLL_MS || 3000);
 const TIMEZONE = "Asia/Ho_Chi_Minh";
-const PER_REQ_DELAY_MS = Number(import.meta.env.VITE_PER_REQ_DELAY_MS || 90); // delay giữa các request
-const BATCH_SIZE = Number(import.meta.env.VITE_BATCH_SIZE || 3); // mỗi request gồm 3 UID
+const PER_REQ_DELAY_MS = Number(import.meta.env.VITE_PER_REQ_DELAY_MS || 90);
+const BATCH_SIZE = Number(import.meta.env.VITE_BATCH_SIZE || 3);
 
-// ==== Tham số chọn trader từ MEXC (có thể override bằng .env) ====
 const TRADERS_INTERVAL = import.meta.env.VITE_TRADERS_INTERVAL || "ALL";
 const TRADERS_LIMIT = Number(import.meta.env.VITE_TRADERS_LIMIT || 100);
 const TRADERS_PAGE = Number(import.meta.env.VITE_TRADERS_PAGE || 1);
 
-// Xây URL gốc của MEXC theo rule bạn đã dùng trong cURL
 function buildMexcTradersUrlWith(orderBy) {
   const base = "https://www.mexc.com/api/platform/futures/copyFutures/api/v1/traders/v2";
   const params = new URLSearchParams({
@@ -34,7 +32,6 @@ function buildMexcTradersUrlWith(orderBy) {
   });
   return `${base}?${params.toString()}`;
 }
-// Endpoint proxy call qua CF Pages Functions (tránh CORS/DDoS)
 function buildProxyCallUrl(callUrl) {
   const u = new URL(`${proxyBase}/api/call`);
   u.searchParams.set("callUrl", callUrl);
@@ -45,18 +42,21 @@ const tsVNT = (t) => {
   if (!t) return "";
   const diff = Date.now() - new Date(t).getTime();
   if (diff < 0) return "just now";
-
   const s = Math.floor(diff / 1000);
   const m = Math.floor(s / 60);
   const h = Math.floor(m / 60);
   const d = Math.floor(h / 24);
-
   if (d > 0) return `${d}d ${h % 24 ? h % 24 + "h" : ""} ago`;
   if (h > 0) return `${h}h${m % 60 ? m % 60 + "m" : ""} ago`;
   if (m > 0) return `${m}m${s % 60 ? s % 60 + "s" : ""} ago`;
   if (s > 5) return `${s}s ago`;
   return "just now";
 };
+
+const fmtAbsVNT = (t) =>
+  t
+    ? new Date(t).toLocaleString("en-GB", { timeZone: TIMEZONE, hour12: false }).replace(",", "")
+    : "";
 
 const num = (x) => (typeof x === "number" ? x : Number(x || 0));
 const fmt = (n, d = 2) =>
@@ -69,7 +69,6 @@ function chunk(arr, size) {
   return out;
 }
 
-/** ===================== API KEY (localStorage) ===================== */
 const STORAGE_KEY = "internal_api_key";
 function getInternalApiKey() {
   try {
@@ -82,10 +81,9 @@ function setInternalApiKey(key) {
   try {
     if (key && typeof key === "string") window.localStorage.setItem(STORAGE_KEY, key);
     else window.localStorage.removeItem(STORAGE_KEY);
-  } catch { }
+  } catch {}
 }
 
-/** fetch JSON helper với header x-api-key tự động */
 async function fetchJSON(url, params = {}, init = {}) {
   const qs = new URLSearchParams(params).toString();
   const key = getInternalApiKey();
@@ -96,21 +94,17 @@ async function fetchJSON(url, params = {}, init = {}) {
   return r.json();
 }
 
-/** ===================== UI Helpers ===================== */
 function ColorNumber({ value, decimals = 2, suffix = "" }) {
   if (!Number.isFinite(value)) return <span className="dim">—</span>;
   const v = Number(value);
   const cls = v > 0 ? "num-pos" : v < 0 ? "num-neg" : "num-zero";
-
   const abs = Math.abs(v);
   const sign = v < 0 ? "-" : "";
   let shortVal;
-
   if (abs >= 1_000_000_000) shortVal = (abs / 1_000_000_000).toFixed(1).replace(/\.0$/, "") + "B";
   else if (abs >= 1_000_000) shortVal = (abs / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
   else if (abs >= 1_000) shortVal = (abs / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
-  else shortVal = fmt(abs, decimals); // ✅ chỉ format abs, không còn dấu -
-
+  else shortVal = fmt(abs, decimals);
   return (
     <span className={cls}>
       {sign}
@@ -119,7 +113,6 @@ function ColorNumber({ value, decimals = 2, suffix = "" }) {
     </span>
   );
 }
-
 
 function ModeCell({ mode }) {
   const m = String(mode || "").toLowerCase();
@@ -133,7 +126,15 @@ function escapeCsv(val) {
 }
 function buildCsv(columns, rows) {
   const header = columns.map((c) => escapeCsv(c.header)).join(",");
-  const lines = rows.map((r) => columns.map((c) => escapeCsv(c.get?.(r))).join(","));
+  const lines = rows.map((r) =>
+    columns
+      .map((c) => {
+        const v = typeof c.csv === "function" ? c.csv(r) : typeof c.get === "function" ? c.get(r) : "";
+        const plain = v == null ? "" : typeof v === "number" ? v : String(v);
+        return escapeCsv(plain);
+      })
+      .join(",")
+  );
   return [header, ...lines].join("\n");
 }
 async function copyCsvToClipboard(columns, rows) {
@@ -141,11 +142,9 @@ async function copyCsvToClipboard(columns, rows) {
   await navigator.clipboard.writeText(csv);
 }
 
-/** ===================== Popup nhập INTERNAL_API_KEY ===================== */
 function ApiKeyModal({ open, onClose }) {
   const [value, setValue] = useState("");
   const inputRef = useRef(null);
-
   useEffect(() => {
     if (open) {
       setValue(getInternalApiKey());
@@ -156,9 +155,7 @@ function ApiKeyModal({ open, onClose }) {
       };
     }
   }, [open]);
-
   if (!open) return null;
-
   const handleSave = () => {
     const trimmed = (value || "").trim();
     setInternalApiKey(trimmed);
@@ -169,7 +166,6 @@ function ApiKeyModal({ open, onClose }) {
     setValue("");
     onClose?.("");
   };
-
   return createPortal(
     <div className="modal-root" role="dialog" aria-modal="true">
       <div className="modal-backdrop" onClick={() => onClose?.(getInternalApiKey())} />
@@ -178,10 +174,7 @@ function ApiKeyModal({ open, onClose }) {
         <p className="modal-desc">
           Khóa này sẽ được lưu trong <code>localStorage</code> và tự động gắn vào header <code>x-api-key</code> cho mọi request.
         </p>
-
-        <label className="modal-label" htmlFor="apiKey">
-          INTERNAL_API_KEY
-        </label>
+        <label className="modal-label" htmlFor="apiKey">INTERNAL_API_KEY</label>
         <input
           id="apiKey"
           ref={inputRef}
@@ -191,18 +184,11 @@ function ApiKeyModal({ open, onClose }) {
           placeholder="Nhập khóa nội bộ..."
           className="modal-input"
         />
-
         <div className="modal-actions">
-          <button className="btn btn-ghost" onClick={handleClear} title="Xóa key khỏi localStorage">
-            Clear
-          </button>
+          <button className="btn btn-ghost" onClick={handleClear} title="Xóa key khỏi localStorage">Clear</button>
           <div className="modal-actions-right">
-            <button className="btn btn-ghost" onClick={() => onClose?.(getInternalApiKey())}>
-              Cancel
-            </button>
-            <button className="btn btn-primary" onClick={handleSave}>
-              Save Key
-            </button>
+            <button className="btn btn-ghost" onClick={() => onClose?.(getInternalApiKey())}>Cancel</button>
+            <button className="btn btn-primary" onClick={handleSave}>Save Key</button>
           </div>
         </div>
       </div>
@@ -211,7 +197,6 @@ function ApiKeyModal({ open, onClose }) {
   );
 }
 
-/** ===================== MAIN APP ===================== */
 export default function App() {
   const [rows, setRows] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
@@ -219,20 +204,13 @@ export default function App() {
   const [aiResult, setAiResult] = useState("");
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [keyExists, setKeyExists] = useState(false);
-
-  // NEW: uid list động lấy từ API
   const [uidList, setUidList] = useState([]);
   const [uidLoading, setUidLoading] = useState(false);
-
-  // NEW: toggle ẩn/hiện PNL âm
   const [showNegativePNL, setShowNegativePNL] = useState(true);
 
-  // id -> row
   const rowsMapRef = useRef(new Map());
-  // symbol -> price
   const priceMapRef = useRef({});
 
-  // ========== Helpers ==========
   function getRowUid(r) {
     return r?.raw?.traderUid != null ? String(r.raw.traderUid) : r?.uid != null ? String(r.uid) : "";
   }
@@ -240,37 +218,27 @@ export default function App() {
     if (!Number.isFinite(n)) return "—";
     const abs = Math.abs(n);
     const sign = n < 0 ? "-" : "";
-    if (abs >= 1_000_000_000)
-      return sign + (abs / 1_000_000_000).toFixed(1).replace(/\.0$/, "") + "B";
-    if (abs >= 1_000_000)
-      return sign + (abs / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
-    if (abs >= 1_000)
-      return sign + (abs / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
-    // ✅ Giữ 2 chữ số thập phân cho số nhỏ
+    if (abs >= 1_000_000_000) return sign + (abs / 1_000_000_000).toFixed(1).replace(/\.0$/, "") + "B";
+    if (abs >= 1_000_000) return sign + (abs / 1_000_000).toFixed(1).replace(/\.0$/, "") + "M";
+    if (abs >= 1_000) return sign + (abs / 1_000).toFixed(1).replace(/\.0$/, "") + "k";
     return sign + abs.toFixed(3).replace(/\.00$/, "");
   };
-
 
   function enrichWithLive(r, priceMap) {
     const open = num(r.openPrice);
     const live = priceMap?.[r.symbol];
     const amount = num(r.amount);
-
     const pnl =
       Number.isFinite(live) && Number.isFinite(open) && Number.isFinite(amount)
         ? (live - open) * (String(r.mode).toLowerCase() === "long" ? 1 : -1) * amount
         : NaN;
-
     const roi =
       Number.isFinite(pnl) && Number.isFinite(num(r.margin)) && num(r.margin) !== 0
         ? (pnl / num(r.margin)) * 100
         : NaN;
-
     const changePct =
       Number.isFinite(open) && Number.isFinite(live) && open !== 0 ? ((live - open) / open) * 100 : NaN;
-
     const openAtMs = r.openAt ? new Date(r.openAt).getTime() : typeof r.openAtMs === "number" ? r.openAtMs : NaN;
-
     return {
       ...r,
       openAt: openAtMs,
@@ -282,12 +250,9 @@ export default function App() {
     };
   }
 
-  // Upsert theo id + prune theo các UID trong batch
   const upsertAndPruneBatch = (arr, batchUids) => {
     const m = rowsMapRef.current;
     const batchSet = new Set(batchUids.map(String));
-
-    // Build mapping uid -> Set(ids) từ response
     const uidToIds = new Map();
     for (const r of Array.isArray(arr) ? arr : []) {
       const uid = getRowUid(r);
@@ -295,8 +260,6 @@ export default function App() {
       if (!uidToIds.has(uid)) uidToIds.set(uid, new Set());
       uidToIds.get(uid).add(r.id);
     }
-
-    // PRUNE
     for (const [id, row] of m.entries()) {
       const uid = getRowUid(row);
       if (!uid || !batchSet.has(uid)) continue;
@@ -305,38 +268,29 @@ export default function App() {
         m.delete(id);
       }
     }
-
-    // UPSERT
     for (const r of Array.isArray(arr) ? arr : []) {
       const existing = m.get(r.id);
       const merged = { ...(existing || {}), ...r };
       const enriched = enrichWithLive(merged, priceMapRef.current);
       m.set(r.id, enriched);
     }
-
-    // Rebuild list
     setRows(Array.from(m.values()));
   };
 
-  // === VIP UIDs (string để giữ leading zero)
   const VIP_UIDS = [
-    "28905362", "71312117", "87698388", "20393898", "61775694", "58298982", "01086225", "74785697", "90901845", "23747691",
-    "15480060", "22247145", "80778881", "54447554", "98086898", "93765871", "85581052", "42806597", "8197321", "64877108",
-    "7981129", "89989257", "13040215", "70798336", "07695752", "07867898", "91401780", "98695755", "94299227", "63070731", "77587922"
+    "28905362","71312117","87698388","20393898","61775694","58298982","01086225","74785697","90901845","23747691",
+    "15480060","22247145","80778881","54447554","98086898","93765871","85581052","42806597","8197321","64877108",
+    "7981129","89989257","13040215","70798336","07695752","07867898","91401780","98695755","94299227","63070731","77587922"
   ];
   const VIP_SET = useMemo(() => new Set(VIP_UIDS), []);
 
   const iconForPNL = (pnl) => {
-    if (pnl > 2000) return "🔥";
-    if (pnl > 1000) return "💰";
-    if (pnl > 500) return "🟢";
     if (pnl > 7000) return "💎";
-    if (pnl > 3000) return "";
-
-
+    if (pnl > 3000) return "💰";
+    if (pnl > 2000) return "🔥";
+    if (pnl > 1000) return "🟢";
     return "";
   };
-
   const iconForMargin = (margin) => {
     if (margin > 10000) return "🏦";
     if (margin > 5000) return "💎";
@@ -344,7 +298,6 @@ export default function App() {
     if (margin > 1000) return "💼";
     return "";
   };
-
   const iconForROI = (roi) => {
     if (roi > 100) return "🚀";
     if (roi > 60) return "🔥";
@@ -353,7 +306,6 @@ export default function App() {
     return "";
   };
 
-  // Giá thị trường định kỳ
   const refreshPrices = async () => {
     try {
       const list = Array.from(rowsMapRef.current.values());
@@ -365,17 +317,15 @@ export default function App() {
         const list2 = list.map((r) => enrichWithLive(r, priceMapRef.current));
         setRows(list2);
       }
-    } catch { }
+    } catch {}
   };
 
-  // NEW: Lấy danh sách UIDs động qua proxy /api/call
   const refreshUIDs = async () => {
     setUidLoading(true);
     setError("");
     try {
       const orderBys = ["ROI", "PNL", "WIN_RATE", "FOLLOWERS"];
       const allUIDs = [];
-
       for (const orderBy of orderBys) {
         try {
           const url = buildMexcTradersUrlWith(orderBy);
@@ -385,12 +335,11 @@ export default function App() {
           const list = content.map((it) => String(it?.uid)).filter(Boolean);
           allUIDs.push(...list);
         } catch (innerErr) {
-          console.warn(`⚠️ Fetch traders failed (${orderBy}):`, innerErr);
+          console.warn(`Fetch traders failed (${orderBy}):`, innerErr);
         }
         await sleep(300);
       }
-
-      const merged = Array.from(new Set(allUIDs)); // loại trùng UID
+      const merged = Array.from(new Set(allUIDs));
       if (!merged.length) {
         throw new Error("Không lấy được UID từ traders API (ROI/PNL/WIN_RATE/FOLLOWERS)");
       }
@@ -402,26 +351,21 @@ export default function App() {
     }
   };
 
-  // Vòng lặp vô tận: duyệt các batch (mỗi batch 3 UID) dựa trên uidList động
   useEffect(() => {
     let cancelled = false;
-
     const startLoop = async () => {
       const has = !!getInternalApiKey();
       setKeyExists(has);
       if (!has) setShowKeyModal(true);
-
       if (!uidList.length) {
         await refreshUIDs();
       }
-
       while (!cancelled) {
         const list = uidList.length ? uidList : [];
         if (list.length === 0) {
           await sleep(Math.max(POLL_MS, 2000));
           continue;
         }
-
         const batches = chunk(list, BATCH_SIZE);
         for (const batch of batches) {
           if (cancelled) break;
@@ -437,10 +381,8 @@ export default function App() {
           }
           await sleep(PER_REQ_DELAY_MS);
         }
-        // lặp lại: không đổi UIDs tự động
       }
     };
-
     startLoop();
     return () => {
       cancelled = true;
@@ -448,47 +390,23 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uidList]);
 
-  // Refresh giá theo chu kỳ
   useEffect(() => {
     const id = setInterval(refreshPrices, POLL_MS);
     return () => clearInterval(id);
   }, []);
 
-  // ========== COLUMNS (đưa icon vào get(...) luôn, bọc trong <span>) ==========
   const columns = useMemo(
     () => [
       {
-        header: "Trader",
-        get: (r) => {
-          const uidStr = getRowUid(r);
-          const name = r.trader ?? "";
-          const isVip = VIP_SET.has(uidStr);
-
-          // Giữ 4 ký tự đầu + 2 ký tự cuối
-          const truncated =
-            name.length > 6
-              ? `${name.slice(0, 4)}…${name.slice(-2)}`
-              : name;
-          return (
-            <>
-              <span className="name-6ch" title={name}>{truncated}</span>
-              {isVip ? " ⭐" : ""}
-            </>
-          );
-        },
-      }
-      ,
-      {
-        header: "Symbol", get: (r) => {
-          return r.symbol.slice(0, 8) ?? "";
-        }
+        header: "Symbol",
+        get: (r) => (r.symbol || "").slice(0, 8),
+        csv: (r) => r.symbol || "",
       },
-
       {
         header: "Mode",
         get: (r) => <ModeCell mode={r.mode} />,
+        csv: (r) => String(r.mode || ""),
       },
-
       {
         header: "Margin",
         get: (r) => {
@@ -500,8 +418,8 @@ export default function App() {
             </span>
           );
         },
+        csv: (r) => (Number.isFinite(num(r.margin)) ? String(num(r.margin)) : ""),
       },
-
       {
         header: "PNL",
         get: (r) => {
@@ -513,9 +431,39 @@ export default function App() {
             </span>
           );
         },
+        csv: (r) => (Number.isFinite(num(r.__pnl)) ? String(num(r.__pnl)) : ""),
       },
-      { header: "Lev", get: (r) => (r.lev ? `${fmt(num(r.lev), 0)}x` : "") },
-      { header: "At VNT", get: (r) => r.openAtStr || tsVNT(r.openAt) },
+      {
+        header: "Lev",
+        get: (r) => (r.lev ? `${fmt(num(r.lev), 0)}x` : ""),
+        csv: (r) => (Number.isFinite(num(r.lev)) ? String(num(r.lev)) : ""),
+      },
+      {
+        header: "At VNT",
+        get: (r) => r.openAtStr || tsVNT(r.openAt),
+        csv: (r) => (r.openAt ? fmtAbsVNT(r.openAt) : r.openAtMs ? fmtAbsVNT(r.openAtMs) : ""),
+      },
+      {
+        header: "Trader",
+        get: (r) => {
+          const uidStr = getRowUid(r);
+          const name = r.trader ?? "";
+          const isVip = VIP_SET.has(uidStr);
+          const truncated = name.length > 6 ? `${name.slice(0, 4)}…${name.slice(-2)}` : name;
+          return (
+            <>
+              <span className="name-6ch" title={name}>{truncated}</span>
+              {isVip ? " ⭐" : ""}
+            </>
+          );
+        },
+        csv: (r) => r.trader ?? "",
+      },
+      {
+        header: "Flrs",
+        get: (r) => r.followers ?? "",
+        csv: (r) => (Number.isFinite(num(r.followers)) ? String(num(r.followers)) : ""),
+      },
       {
         header: "ROI %",
         get: (r) => {
@@ -527,31 +475,52 @@ export default function App() {
             </span>
           );
         },
+        csv: (r) => (Number.isFinite(num(r.__roi)) ? String(num(r.__roi)) : ""),
       },
-
-      { header: "M/Mode", get: (r) => r.marginMode ?? "" },
-      { header: "Followers", get: (r) => r.followers ?? "" },
-      { header: "Notional", get: (r) => fmtShort(num(r.notional), 2) },
-
-      { header: "Open Price", get: (r) => fmtShort(num(r.openPrice), 4) },
-      { header: "Market Price", get: (r) => fmtShort(num(r.__marketPrice), 4) },
+      {
+        header: "M/Mode",
+        get: (r) => r.marginMode ?? "",
+        csv: (r) => r.marginMode ?? "",
+      },
+      {
+        header: "Notional",
+        get: (r) => fmtShort(num(r.notional), 2),
+        csv: (r) => (Number.isFinite(num(r.notional)) ? String(num(r.notional)) : ""),
+      },
+      {
+        header: "Open Price",
+        get: (r) => fmtShort(num(r.openPrice), 4),
+        csv: (r) => (Number.isFinite(num(r.openPrice)) ? String(num(r.openPrice)) : ""),
+      },
+      {
+        header: "Market Price",
+        get: (r) => fmtShort(num(r.__marketPrice), 4),
+        csv: (r) => (Number.isFinite(num(r.__marketPrice)) ? String(num(r.__marketPrice)) : ""),
+      },
       {
         header: "Δ % vs Open",
         get: (r) => <ColorNumber value={num(r.__changePct)} decimals={2} suffix="%" />,
+        csv: (r) => (Number.isFinite(num(r.__changePct)) ? String(num(r.__changePct)) : ""),
       },
-      { header: "Amount", get: (r) => fmtShort(num(r.amount), 3) },
-
-      { header: "Margin %", get: (r) => `${fmt(num(r.marginPct), 2)}%` },
-
+      {
+        header: "Amount",
+        get: (r) => fmtShort(num(r.amount), 3),
+        csv: (r) => (Number.isFinite(num(r.amount)) ? String(num(r.amount)) : ""),
+      },
+      {
+        header: "Margin %",
+        get: (r) => `${fmt(num(r.marginPct), 2)}%`,
+        csv: (r) => (Number.isFinite(num(r.marginPct)) ? String(num(r.marginPct)) : ""),
+      },
       {
         header: "UID",
         get: (r) => getRowUid(r),
+        csv: (r) => getRowUid(r),
       },
     ],
-    [] // deps rỗng
+    []
   );
 
-  // ========== FILTER & SORT ==========
   const filtered = useMemo(
     () => (showNegativePNL ? rows : rows.filter((r) => Number(r.__pnl) >= 0)),
     [rows, showNegativePNL]
@@ -562,7 +531,6 @@ export default function App() {
     [filtered]
   );
 
-  // ========== AI Actions ==========
   const runAI = async () => {
     try {
       setAiResult("Đang phân tích...");
@@ -570,7 +538,6 @@ export default function App() {
       const key = getInternalApiKey();
       const headers = new Headers({ "Content-Type": "application/json" });
       if (key) headers.set("x-api-key", key);
-
       const res = await fetch(`${AI_API}?topN=8`, {
         method: "POST",
         headers,
@@ -593,23 +560,19 @@ export default function App() {
       }
       setOrdersLoading(true);
       setAiResult("Đang lấy lệnh và phân tích (Orders)…");
-
       const headers = new Headers({ "Content-Type": "application/json" });
       headers.set("x-api-key", key);
-
       const res = await fetch(`${ORDERS_AI_API}?topN=10&lang=vi`, {
         method: "POST",
         headers,
         body: JSON.stringify({}),
       });
-
       let data;
       try {
         data = await res.json();
       } catch {
         throw new Error(`Response không phải JSON (HTTP ${res.status})`);
       }
-
       if (!res.ok || data?.success === false) {
         throw new Error(data?.error || `HTTP ${res.status}`);
       }
@@ -630,13 +593,11 @@ export default function App() {
         <button className="btn" onClick={() => setShowKeyModal(true)} title="Set INTERNAL_API_KEY">
           {keyExists ? "Update Key" : "Set API Key"}
         </button>
-
         <button className="btn" onClick={runAI}>AI Recommend</button>
         <button className="btn" onClick={runOrdersAI} disabled={ordersLoading}>
           {ordersLoading ? "Orders…" : "Orders"}
         </button>
         <button className="btn" onClick={() => copyCsvToClipboard(columns, sorted)}>Copy CSV</button>
-
         <span
           className="inline-dot"
           style={{
@@ -649,14 +610,9 @@ export default function App() {
           }}
           title={keyExists ? "API key loaded" : "Missing API key"}
         />
-
-        {/* ❌ ĐÃ BỎ NÚT REFRESH TOÀN BỘ */}
-
         <button className="btn" onClick={refreshUIDs} disabled={uidLoading}>
           {uidLoading ? "Fetching UIDs…" : "Refresh UIDs"}
         </button>
-
-        {/* ✅ Nút bật/tắt hiển thị PNL âm */}
         <button
           className="btn"
           style={{
@@ -667,8 +623,6 @@ export default function App() {
         >
           {showNegativePNL ? "Hide -PNL" : "Show -PNL"}
         </button>
-
-        {/* hiển thị số lượng UID hiện có */}
         <span style={{ opacity: 0.8, fontSize: 12 }}>UIDs: {uidList.length}</span>
       </div>
 
