@@ -457,7 +457,11 @@ export default function App() {
             </>
           );
         },
-        csv: (r) => r.trader ?? "",
+        csv: (r) => {
+          const uidStr = getRowUid(r);
+          const isVip = VIP_SET.has(uidStr);
+          return r.trader ? r.trader + (isVip ? " ⭐" : "") : "";
+        },
       },
       {
         header: "Flrs",
